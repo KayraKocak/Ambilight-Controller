@@ -1,0 +1,48 @@
+3.06.2026 11:37:57 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
+3.06.2026 11:37:58 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
+3.06.2026 11:37:58 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
+3.06.2026 11:37:59 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
+3.06.2026 11:38:00 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
+3.06.2026 11:38:00 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
+3.06.2026 11:38:01 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
+3.06.2026 11:38:02 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
+3.06.2026 11:38:02 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
+3.06.2026 11:38:03 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
+3.06.2026 11:38:04 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
+3.06.2026 11:38:04 GenericException: System.Exception: Could not find any DXGI adapter/output that supports Desktop Duplication. Make sure your screen is active.
+   at AmbilightControllerForm.DxgiScreenCapture.Initialize() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 81
+   at AmbilightControllerForm.DxgiScreenCapture..ctor() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\DxgiScreenCapture.cs:line 21
+   at AmbilightControllerForm.Form1.AmbilightCaptureLoop() in C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\Form1.cs:line 1661
