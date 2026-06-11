@@ -79,35 +79,55 @@ class UpdateApp:
         try:
             # Step 1: Wait a tiny bit for the main C# application to fully close
             time.sleep(1.5)
-            self.update_status("Fetching latest changes from GitHub...", 30)
             
-            # Step 2: Run git pull
-            # Ensure git environment doesn't prompt for login interactively if credentials fail
+            # Delete version.txt before pulling the update to guarantee a fresh copy
+            if os.path.exists("version.txt"):
+                try:
+                    os.remove("version.txt")
+                except Exception as e:
+                    print(f"Failed to delete version.txt: {e}")
+            
+            # Step 2: Fetch and reset local files to remote state (ensures clean overwrite without merge conflicts)
             env = os.environ.copy()
             env["GIT_TERMINAL_PROMPT"] = "0"
             
-            result = subprocess.run(
-                ["git", "pull", "origin", "main"],
+            self.update_status("Fetching updates from GitHub...", 50)
+            fetch_result = subprocess.run(
+                ["git", "fetch", "origin"],
                 capture_output=True,
                 text=True,
                 env=env,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             
-            if result.returncode != 0:
-                print(result.stderr)
-                self.update_status("Error: Git pull failed. Checking connection...", 50)
-                time.sleep(3)
-                # Fallback: try git pull with no branch specified
-                result = subprocess.run(
-                    ["git", "pull"],
+            if fetch_result.returncode != 0:
+                print(fetch_result.stderr)
+                self.update_status("Error: Fetch failed. Checking connection...", 60)
+                time.sleep(2)
+                # Fallback fetch
+                subprocess.run(["git", "fetch"], env=env, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+
+            self.update_status("Applying update...", 75)
+            # Force local tracked files to match the remote main branch exactly (restores version.txt)
+            reset_result = subprocess.run(
+                ["git", "reset", "--hard", "origin/main"],
+                capture_output=True,
+                text=True,
+                env=env,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+            
+            if reset_result.returncode != 0:
+                # Try master branch as fallback
+                reset_result = subprocess.run(
+                    ["git", "reset", "--hard", "origin/master"],
                     capture_output=True,
                     text=True,
                     env=env,
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
                 )
-                if result.returncode != 0:
-                    raise Exception(result.stderr)
+                if reset_result.returncode != 0:
+                    raise Exception(reset_result.stderr)
             
             self.update_status("Update applied successfully! Relaunching...", 90)
             time.sleep(1.0)
