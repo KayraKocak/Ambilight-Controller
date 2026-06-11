@@ -1337,6 +1337,47 @@ namespace AmbilightControllerForm
             // ==========================================
             timerRainbow = new System.Windows.Forms.Timer { Interval = 30 }; // Smooth 30ms transitions
             timerRainbow.Tick += TimerRainbow_Tick;
+
+            // ==========================================
+            // 6. VERSION LABEL IN BOTTOM-RIGHT
+            // ==========================================
+            string localVersion = "1.0";
+            try
+            {
+                string rootPath = AppDomain.CurrentDomain.BaseDirectory;
+                while (!string.IsNullOrEmpty(rootPath) && 
+                       !File.Exists(Path.Combine(rootPath, "updater.py")) && 
+                       !File.Exists(Path.Combine(rootPath, "run.bat")))
+                {
+                    rootPath = Path.GetDirectoryName(rootPath);
+                }
+                if (string.IsNullOrEmpty(rootPath)) rootPath = AppDomain.CurrentDomain.BaseDirectory;
+
+                string versionPath = Path.Combine(rootPath, "version.txt");
+                if (File.Exists(versionPath))
+                {
+                    string content = File.ReadAllText(versionPath);
+                    var match = System.Text.RegularExpressions.Regex.Match(content, @"version:\s*([\d\.]+)");
+                    if (match.Success)
+                    {
+                        localVersion = match.Groups[1].Value;
+                    }
+                }
+            }
+            catch { }
+
+            Label lblVersion = new Label
+            {
+                Text = $"v{localVersion}",
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Regular),
+                ForeColor = Color.White,
+                Location = new Point(this.Width - 60, this.Height - 20),
+                Size = new Size(50, 15),
+                TextAlign = ContentAlignment.MiddleRight,
+                BackColor = Color.Transparent
+            };
+            this.Controls.Add(lblVersion);
+            lblVersion.BringToFront();
         }
 
         // ==========================================================================
