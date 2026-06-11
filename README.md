@@ -1,3 +1,5 @@
+This project currently has no standalone exe file, you will need dotnet installed on your pc. ".net 9" is confirmed working, other versions may or may not work
+
 Similar To Philips AmbiLight.
 
 Works with both adressable and non adressable rgb leds.
@@ -10,3 +12,4 @@ The wireless port streams the static color changes to port 7777, and animated / 
 The app includes Color Calibration for your leds, 3 color calibration presets. For color calibration, eyeball your leds to display white at 4 different brightnesses. Min brightness is your black, if for some reason your leds are completely off at higher rgb values.
 
 By default, wireless connection is set to 192.168.1.100, this is your microcontroller's local IP. Setting a static IP for your microcontroller is recommended.
+
