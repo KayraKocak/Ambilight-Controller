@@ -256,4 +256,181 @@ namespace AmbilightControllerForm
             this.Value = newValue;
         }
     }
+
+    public class DummyFlatAppearance
+    {
+        public int BorderSize { get; set; }
+        public Color BorderColor { get; set; }
+        public Color MouseOverBackColor { get; set; }
+        public Color MouseDownBackColor { get; set; }
+        public Color CheckedBackColor { get; set; }
+    }
+
+    public class GlassButton : Control
+    {
+        private bool _isHovered = false;
+        private bool _isPressed = false;
+
+        public DummyFlatAppearance FlatAppearance { get; } = new DummyFlatAppearance();
+        public FlatStyle FlatStyle { get; set; }
+        public ContentAlignment TextAlign { get; set; }
+
+        public void PerformClick()
+        {
+            this.OnClick(EventArgs.Empty);
+        }
+
+        public int BorderRadius { get; set; } = 10;
+        public Color GlassColor { get; set; } = Color.FromArgb(60, 255, 255, 255);
+        public Color HoverColor { get; set; } = Color.FromArgb(90, 255, 255, 255);
+        public Color PressedColor { get; set; } = Color.FromArgb(40, 255, 255, 255);
+        public Color GlowColor { get; set; } = Color.Transparent;
+        public Color BorderColor { get; set; } = Color.FromArgb(100, 255, 255, 255);
+        public float BorderThickness { get; set; } = 1f;
+
+        private Image _glassImage;
+
+        public GlassButton()
+        {
+            this.SetStyle(ControlStyles.SupportsTransparentBackColor | 
+                          ControlStyles.OptimizedDoubleBuffer | 
+                          ControlStyles.AllPaintingInWmPaint | 
+                          ControlStyles.UserPaint, true);
+            this.BackColor = Color.Transparent; // Calls the original property
+            this.ForeColor = Color.White;
+            this.Size = new Size(120, 40);
+        }
+
+        // Hide BackColor to trick WinForms framework into transparency, while retaining value for Form1
+        public new Color BackColor
+        {
+            get => GlassColor;
+            set
+            {
+                GlassColor = value;
+                base.BackColor = Color.Transparent;
+                Invalidate();
+            }
+        }
+
+        // Hide BackgroundImage to stop Control from drawing it squarely over our rounded borders
+        public new Image BackgroundImage
+        {
+            get => _glassImage;
+            set
+            {
+                _glassImage = value;
+                base.BackgroundImage = null;
+                Invalidate();
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            Rectangle rect = new Rectangle(1, 1, this.Width - 2, this.Height - 2);
+            using (GraphicsPath path = GetRoundedPath(rect, BorderRadius))
+            {
+                if (_glassImage != null)
+                {
+                    e.Graphics.SetClip(path);
+                    e.Graphics.DrawImage(_glassImage, this.ClientRectangle);
+                    e.Graphics.ResetClip();
+                }
+                else
+                {
+                    // Fill
+                    Color fillColor = GlassColor;
+                    if (_isPressed)
+                    {
+                        fillColor = ControlPaint.Dark(GlassColor, 0.1f);
+                    }
+                    else if (_isHovered)
+                    {
+                        fillColor = ControlPaint.Light(GlassColor, 0.2f);
+                    }
+
+                    using (SolidBrush brush = new SolidBrush(fillColor))
+                    {
+                        e.Graphics.FillPath(brush, path);
+                    }
+                }
+
+                // Border/Glow
+                if (GlowColor != Color.Transparent && (_isHovered || _isPressed))
+                {
+                    using (Pen glowPen = new Pen(Color.FromArgb(80, GlowColor), 2f))
+                    {
+                        e.Graphics.DrawPath(glowPen, path);
+                    }
+                }
+                else if (BorderThickness > 0)
+                {
+                    using (Pen borderPen = new Pen(BorderColor, BorderThickness))
+                    {
+                        e.Graphics.DrawPath(borderPen, path);
+                    }
+                }
+            }
+
+            // Text
+            if (!string.IsNullOrEmpty(this.Text))
+            {
+                TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
+                TextRenderer.DrawText(e.Graphics, this.Text, this.Font, this.ClientRectangle, this.ForeColor, flags);
+            }
+            
+            // Do not call base.OnPaint to prevent standard flat drawing
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _isHovered = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _isHovered = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                _isPressed = true;
+                Invalidate();
+            }
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            _isPressed = false;
+            Invalidate();
+            base.OnMouseUp(e);
+        }
+
+        private GraphicsPath GetRoundedPath(Rectangle rect, int radius)
+        {
+            GraphicsPath path = new GraphicsPath();
+            if (radius <= 0)
+            {
+                path.AddRectangle(rect);
+                return path;
+            }
+            int d = radius * 2;
+            path.AddArc(rect.X, rect.Y, d, d, 180, 90);
+            path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
+            path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+            path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+    }
 }

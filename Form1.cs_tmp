@@ -1113,7 +1113,7 @@ namespace AmbilightControllerForm
             };
             MouseEventHandler calibMouseDown = (s, e) => {
                 GlassButton btn = (GlassButton)s;
-                if (e.Button == MouseButtons.Right && btn != btnCalR)
+                if (e.GlassButton == MouseButtons.Right && btn != btnCalR)
                 {
                     int index = Array.IndexOf(calBtns, btn);
                     if (index >= 0 && index < 3)
@@ -1241,14 +1241,14 @@ namespace AmbilightControllerForm
             Point dragStartPreset = Point.Empty;
 
             MouseEventHandler presetMouseDown = (s2, e2) => {
-                if (e2.Button == MouseButtons.Left)
+                if (e2.GlassButton == MouseButtons.Left)
                 {
                     dragStartPreset = e2.Location;
                 }
             };
 
             MouseEventHandler presetMouseMove = (s2, e2) => {
-                if (e2.Button == MouseButtons.Left && dragStartPreset != Point.Empty)
+                if (e2.GlassButton == MouseButtons.Left && dragStartPreset != Point.Empty)
                 {
                     GlassButton btn = (GlassButton)s2;
                     Color c = btn.BackColor;
@@ -1477,7 +1477,7 @@ namespace AmbilightControllerForm
         // ==========================================================================
         private void TitleBar_MouseDown(object sender, MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left)
+            if (e.GlassButton == MouseButtons.Left)
             {
                 isDraggingWindow = true;
                 dragStartPoint = new Point(e.X, e.Y);
@@ -1560,7 +1560,7 @@ namespace AmbilightControllerForm
             if (clickedIndex < 0) clickedIndex = 0;
             if (clickedIndex >= addressablePixelCount) clickedIndex = addressablePixelCount - 1;
 
-            if (e.Button == MouseButtons.Left)
+            if (e.GlassButton == MouseButtons.Left)
             {
                 bool isCtrlPressed = (Control.ModifierKeys & Keys.Control) == Keys.Control;
                 if (!isCtrlPressed)
@@ -1574,7 +1574,7 @@ namespace AmbilightControllerForm
                 }
             }
             
-            ApplyAddressableActionCore(clickedIndex, e.Button);
+            ApplyAddressableActionCore(clickedIndex, e.GlassButton);
             lastHoveredSegment = clickedIndex;
 
             panelVisualizer.Invalidate();
@@ -1585,7 +1585,7 @@ namespace AmbilightControllerForm
         {
             if (!isAddressableMode) return;
             
-            if (e.Button == MouseButtons.Left || e.Button == MouseButtons.Right || e.Button == MouseButtons.Middle)
+            if (e.GlassButton == MouseButtons.Left || e.GlassButton == MouseButtons.Right || e.GlassButton == MouseButtons.Middle)
             {
                 float segmentWidth = panelVisualizer.Width / (float)addressablePixelCount;
                 int hoverIndex = (int)(e.X / segmentWidth);
@@ -1599,12 +1599,12 @@ namespace AmbilightControllerForm
                         int step = hoverIndex > lastHoveredSegment ? 1 : -1;
                         for (int i = lastHoveredSegment + step; i != hoverIndex + step; i += step)
                         {
-                            ApplyAddressableActionCore(i, e.Button);
+                            ApplyAddressableActionCore(i, e.GlassButton);
                         }
                     }
                     else
                     {
-                        ApplyAddressableActionCore(hoverIndex, e.Button);
+                        ApplyAddressableActionCore(hoverIndex, e.GlassButton);
                     }
 
                     lastHoveredSegment = hoverIndex;
@@ -1852,7 +1852,7 @@ namespace AmbilightControllerForm
 
         private void PboxColorWheel_MouseDown(object sender, MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left)
+            if (e.GlassButton == MouseButtons.Left)
             {
                 isDraggingWheelPin = true;
                 PickColorFromWheel(e.Location);
@@ -3155,7 +3155,7 @@ namespace AmbilightControllerForm
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button != MouseButtons.Left) return;
+            if (e.GlassButton != MouseButtons.Left) return;
             _dragging = HitTest(e.X, e.Y);
             if (_dragging >= 0) Cursor = Cursors.SizeAll;
         }
