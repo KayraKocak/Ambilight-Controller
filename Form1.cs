@@ -51,7 +51,7 @@ namespace AmbilightControllerForm
         private Panel titleBar;
         private Label lblTitle;
         private Button btnMin;
-        private Button btnMax;
+
         private Button btnClose;
 
         private Panel panelVisualizerGlow;
@@ -65,10 +65,10 @@ namespace AmbilightControllerForm
         private Color lastSentColor = Color.Black;
         private Panel panelColorPreview;
 
-        private TrackBar trkBrightness;
-        private TrackBar trkR;
-        private TrackBar trkG;
-        private TrackBar trkB;
+        private GlassSlider trkBrightness;
+        private GlassSlider trkR;
+        private GlassSlider trkG;
+        private GlassSlider trkB;
         private bool isUpdatingSliders = false;
 
         private CalibrationProfile currentCalibProfile = null;
@@ -97,7 +97,7 @@ namespace AmbilightControllerForm
         // Ambilight Cosmetic Smoothing
         private int currentSmoothThreshold = 50;
         private int currentSmoothFrames = 5;
-        private TrackBar trkSmoothThreshold;
+        private GlassSlider trkSmoothThreshold;
         private NumericUpDown numSmoothFrames;
         private Label lblSmoothFrames;
         private Label lblSmoothThreshold;
@@ -118,6 +118,87 @@ namespace AmbilightControllerForm
         private Button btnAddressableSettings;
         private Rectangle[] addressableCaptureAreas;
 
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+        private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+        private const int DWMWCP_ROUND = 2;
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            int preference = DWMWCP_ROUND;
+            DwmSetWindowAttribute(this.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x02000000; // WS_EX_COMPOSITED
+                return cp;
+            }
+        }
+
+        private async void LoadAndBlurBackgroundAsync()
+        {
+            string bgPath = Path.Combine(Application.StartupPath, "BG.png");
+            if (!File.Exists(bgPath)) return;
+
+            int targetW = this.ClientSize.Width > 0 ? this.ClientSize.Width : 1000;
+            int targetH = this.ClientSize.Height > 0 ? this.ClientSize.Height : 680;
+
+            try
+            {
+                Image bgImage = null;
+                await Task.Run(() =>
+                {
+                    using (Image img = Image.FromFile(bgPath))
+                    {
+                        int scale = 8;
+                        using (Bitmap small = new Bitmap(targetW / scale, targetH / scale))
+                        {
+                            using (Graphics g = Graphics.FromImage(small))
+                            {
+                                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                
+                                double ratioX = (double)small.Width / img.Width;
+                                double ratioY = (double)small.Height / img.Height;
+                                double ratio = Math.Max(ratioX, ratioY); // Max for "Zoom to fit" (Cover)
+                                
+                                int drawWidth = (int)Math.Ceiling(img.Width * ratio) + 2;
+                                int drawHeight = (int)Math.Ceiling(img.Height * ratio) + 2;
+                                int drawX = (small.Width - drawWidth) / 2 - 1;
+                                int drawY = (small.Height - drawHeight) / 2 - 1;
+                                
+                                g.DrawImage(img, drawX, drawY, drawWidth, drawHeight);
+                            }
+
+                            bgImage = new Bitmap(targetW, targetH);
+                            using (Graphics g2 = Graphics.FromImage(bgImage))
+                            {
+                                g2.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                // Overscan slightly to avoid HighQualityBicubic edge transparency bleeding
+                                g2.DrawImage(small, -4, -4, bgImage.Width + 8, bgImage.Height + 8);
+
+                                using (SolidBrush darkBrush = new SolidBrush(Color.FromArgb(120, 0, 0, 0)))
+                                {
+                                    g2.FillRectangle(darkBrush, 0, 0, bgImage.Width, bgImage.Height);
+                                }
+                            }
+                        }
+                    }
+                });
+
+                this.BackgroundImage = bgImage;
+                this.BackgroundImageLayout = ImageLayout.None;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Failed to load background: " + ex.Message);
+            }
+        }
+
         public Form1()
         {
             SetupCustomStyles();
@@ -128,6 +209,8 @@ namespace AmbilightControllerForm
             // Set initial selector position
             selectedWheelPoint = GetWheelCoordinatesFromColor(currentRgb, pboxColorWheel);
             UpdateActiveColor(currentRgb);
+
+            LoadAndBlurBackgroundAsync();
 
             // Asynchronously check for updates
             Task.Run(() => CheckForUpdates());
@@ -463,12 +546,11 @@ namespace AmbilightControllerForm
                 Visible = false
             };
             
-            trkSmoothThreshold = new TrackBar
+            trkSmoothThreshold = new GlassSlider
             {
                 Minimum = 0,
                 Maximum = 765,
                 Value = Math.Max(0, Math.Min(765, currentSmoothThreshold)),
-                TickStyle = TickStyle.None,
                 Location = new Point(200, 473),
                 Size = new Size(320, 30),
                 Visible = false
@@ -547,7 +629,7 @@ namespace AmbilightControllerForm
             {
                 Size = new Size(this.Width, 40),
                 Location = new Point(0, 0),
-                BackColor = Color.FromArgb(14, 15, 17) // Sleek near-black titlebar
+                BackColor = Color.Transparent
             };
             titleBar.MouseDown += TitleBar_MouseDown;
             titleBar.MouseMove += TitleBar_MouseMove;
@@ -569,16 +651,10 @@ namespace AmbilightControllerForm
             btnClose = CreateTitleBarButton("✕", this.Width - 36, Color.FromArgb(232, 17, 35));
             btnClose.Click += (s, e) => this.Close();
 
-            btnMax = CreateTitleBarButton("□", this.Width - 68, Color.FromArgb(40, 40, 40));
-            btnMax.Click += (s, e) => {
-                this.WindowState = this.WindowState == FormWindowState.Maximized ? 
-                    FormWindowState.Normal : FormWindowState.Maximized;
-            };
-
-            btnMin = CreateTitleBarButton("—", this.Width - 100, Color.FromArgb(40, 40, 40));
+            btnMin = CreateTitleBarButton("—", this.Width - 68, Color.FromArgb(40, 40, 40));
             btnMin.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
 
-            titleBar.Controls.AddRange(new Control[] { lblTitle, btnClose, btnMax, btnMin });
+            titleBar.Controls.AddRange(new Control[] { lblTitle, btnClose, btnMin });
             this.Controls.Add(titleBar);
 
             // ==========================================
@@ -820,15 +896,15 @@ namespace AmbilightControllerForm
             rightPanel.Controls.Add(pboxColorWheel);
 
             // Brightness vertical slider
-            trkBrightness = new TrackBar
+            trkBrightness = new GlassSlider
             {
                 Orientation = Orientation.Vertical,
                 Minimum = 0,
                 Maximum = 100,
                 Value = 50,
-                TickStyle = TickStyle.None,
                 Location = new Point(155, 10),
-                Size = new Size(30, 120)
+                Size = new Size(30, 120),
+                FillColor = Color.White
             };
             trkBrightness.Scroll += TrkBrightness_Scroll;
             rightPanel.Controls.Add(trkBrightness);
@@ -861,9 +937,9 @@ namespace AmbilightControllerForm
 
             // RGB horizontal sliders
             EventHandler rgbScroll = (s, e) => TrkRgb_Scroll(s, e);
-            trkR = new TrackBar { Minimum = 0, Maximum = 255, TickStyle = TickStyle.None, Location = new Point(10, 185), Size = new Size(190, 30) };
-            trkG = new TrackBar { Minimum = 0, Maximum = 255, TickStyle = TickStyle.None, Location = new Point(10, 220), Size = new Size(190, 30) };
-            trkB = new TrackBar { Minimum = 0, Maximum = 255, TickStyle = TickStyle.None, Location = new Point(10, 255), Size = new Size(190, 30) };
+            trkR = new GlassSlider { Minimum = 0, Maximum = 255, Location = new Point(10, 185), Size = new Size(190, 30), FillColor = Color.FromArgb(255, 80, 80) };
+            trkG = new GlassSlider { Minimum = 0, Maximum = 255, Location = new Point(10, 220), Size = new Size(190, 30), FillColor = Color.FromArgb(80, 255, 80) };
+            trkB = new GlassSlider { Minimum = 0, Maximum = 255, Location = new Point(10, 255), Size = new Size(190, 30), FillColor = Color.FromArgb(80, 80, 255) };
             trkR.Scroll += rgbScroll;
             trkG.Scroll += rgbScroll;
             trkB.Scroll += rgbScroll;
@@ -1229,6 +1305,16 @@ namespace AmbilightControllerForm
                 
                 if (!isEmpty)
                 {
+                    ColorToHsv(c, out double h, out double s, out double v);
+                    if (v > 0.01f)
+                    {
+                        currentSat = (float)s;
+                        if (s > 0.01f)
+                        {
+                            currentHue = (float)h;
+                        }
+                    }
+                    
                     if (isAddressableMode && btn.Tag is Color[] addrColors)
                     {
                         // Addressable preset with stored segment data:
@@ -1246,32 +1332,35 @@ namespace AmbilightControllerForm
                         }
                         SendAddressableDataToHardware(presetEp);
                         panelVisualizer.Invalidate();
+                        
+                        // Sync UI with preset's base color
+                        selectedWheelPoint = GetWheelCoordinatesFromColor(c, pboxColorWheel);
+                        pboxColorWheel.Invalidate();
+                        
+                        if (!isUpdatingSliders && trkR != null)
+                        {
+                            isUpdatingSliders = true;
+                            trkR.Value = c.R;
+                            trkG.Value = c.G;
+                            trkB.Value = c.B;
+                            trkBrightness.Value = (int)(v * 100);
+                            isUpdatingSliders = false;
+                        }
                     }
                     else if (isAddressableMode && selectedSegments.Count == 0)
                     {
                         // No pixels selected = fill all → 7777 (static color)
-                        for (int i = 0; i < addressablePixelCount; i++)
-                        {
-                            segmentColors[i] = c;
-                        }
-                        SendAddressableDataToHardware(udpTarget7777);
-                        panelVisualizer.Invalidate();
-                        selectedWheelPoint = GetWheelCoordinatesFromColor(c, pboxColorWheel);
-                        pboxColorWheel.Invalidate();
+                        UpdateActiveColor(c, true, false, false, udpTarget7777);
                     }
                     else if (isAddressableMode)
                     {
                         // Specific pixels selected → 7778
                         UpdateActiveColor(c);
-                        selectedWheelPoint = GetWheelCoordinatesFromColor(c, pboxColorWheel);
-                        pboxColorWheel.Invalidate();
                     }
                     else
                     {
                         // Generic mode, no animation → 7777
                         UpdateActiveColor(c, true, false, false, udpTarget7777);
-                        selectedWheelPoint = GetWheelCoordinatesFromColor(c, pboxColorWheel);
-                        pboxColorWheel.Invalidate();
                     }
                 }
             };
@@ -1686,9 +1775,8 @@ namespace AmbilightControllerForm
                         double angle = Math.Atan2(dy, dx) + Math.PI; // Range [0, 2*PI]
                         double hue = angle * 180.0 / Math.PI;
                         double saturation = dist / radius;
-                        double lightness = 0.5;
 
-                        colorWheelBmp.SetPixel(x, y, ColorFromHsl(hue, saturation, lightness));
+                        colorWheelBmp.SetPixel(x, y, ColorFromHsv(hue, saturation, 1.0));
                     }
                     else
                     {
@@ -1746,11 +1834,12 @@ namespace AmbilightControllerForm
                     selectedWheelPoint = pt;
                     
                     // Respect brightness slider value
-                    currentHue = baseC.GetHue();
-                    currentSat = baseC.GetSaturation();
-                    float l = trkBrightness != null ? trkBrightness.Value / 100f : 0.5f;
+                    ColorToHsv(baseC, out double h, out double s, out double v);
+                    currentHue = (float)h;
+                    currentSat = (float)s;
+                    float l = trkBrightness != null ? trkBrightness.Value / 100f : 1.0f;
                     
-                    Color c = ColorFromHsl(currentHue, currentSat, l);
+                    Color c = ColorFromHsv(currentHue, currentSat, l);
                     UpdateActiveColor(c, true, true, true);
                     pboxColorWheel.Invalidate();
                 }
@@ -2432,15 +2521,19 @@ namespace AmbilightControllerForm
             if (isUpdatingSliders || !isSystemOn) return;
             Color c = Color.FromArgb(trkR.Value, trkG.Value, trkB.Value);
             
-            // Retain Hue/Sat if black/white, otherwise update them
-            if (c.GetSaturation() > 0.01f && c.GetBrightness() > 0.01f && c.GetBrightness() < 0.99f)
+            // Retain Hue if grayscale, retain Hue/Sat if black, otherwise update
+            ColorToHsv(c, out double h, out double s, out double v);
+            if (v > 0.01f)
             {
-                currentHue = c.GetHue();
-                currentSat = c.GetSaturation();
+                currentSat = (float)s;
+                if (s > 0.01f)
+                {
+                    currentHue = (float)h;
+                }
             }
             
             isUpdatingSliders = true;
-            trkBrightness.Value = (int)(c.GetBrightness() * 100);
+            trkBrightness.Value = (int)(v * 100);
             isUpdatingSliders = false;
             
             UpdateActiveColor(c, true, false);
@@ -2452,7 +2545,7 @@ namespace AmbilightControllerForm
             
             // Reconstruct color with new brightness but same Hue/Sat
             float l = trkBrightness.Value / 100f;
-            Color c = ColorFromHsl(currentHue, currentSat, l);
+            Color c = ColorFromHsv(currentHue, currentSat, l);
             
             isUpdatingSliders = true;
             trkR.Value = c.R;
@@ -2473,12 +2566,19 @@ namespace AmbilightControllerForm
                     {
                         segmentColors[idx] = c;
                     }
-                    panelVisualizer.Invalidate();
-                    if (streamToHardware)
+                }
+                else
+                {
+                    for (int i = 0; i < addressablePixelCount; i++)
                     {
-                        // Addressable with selected pixels always goes to 7778 unless an override is provided
-                        SendAddressableDataToHardware(endpointOverride);
+                        segmentColors[i] = c;
                     }
+                }
+                panelVisualizer.Invalidate();
+                if (streamToHardware)
+                {
+                    // Addressable always goes to 7778 unless an override is provided
+                    SendAddressableDataToHardware(endpointOverride);
                 }
                 streamToHardware = false;
             }
@@ -2504,7 +2604,8 @@ namespace AmbilightControllerForm
                 trkB.Value = c.B;
                 if (!skipBrightnessUpdate)
                 {
-                    trkBrightness.Value = (int)(c.GetBrightness() * 100);
+                    ColorToHsv(c, out double h, out double s, out double v);
+                    trkBrightness.Value = (int)(v * 100);
                 }
                 isUpdatingSliders = false;
             }
@@ -2741,13 +2842,17 @@ namespace AmbilightControllerForm
         // ==========================================================================
         // GUI DESIGN SCAFFOLD FACTORIES
         // ==========================================================================
-        private Panel CreateContainerPanel(int x, int y, int w, int h)
+        private GlassPanel CreateContainerPanel(int x, int y, int w, int h)
         {
-            return new Panel
+            return new GlassPanel
             {
                 Location = new Point(x, y),
                 Size = new Size(w, h),
-                BackColor = Color.FromArgb(24, 25, 28) // #18191c
+                BorderRadius = 15,
+                GlowSize = 3f,
+                GlowColor = Color.FromArgb(80, 0, 255, 255), // Cyan subtle glow
+                BorderColor = Color.FromArgb(40, 255, 255, 255),
+                GlassColor = Color.FromArgb(180, 20, 20, 25)
             };
         }
 
@@ -2875,6 +2980,46 @@ namespace AmbilightControllerForm
             }
         }
 
+        private void ColorToHsv(Color c, out double h, out double s, out double v)
+        {
+            double r = c.R / 255.0;
+            double g = c.G / 255.0;
+            double b = c.B / 255.0;
+            double max = Math.Max(r, Math.Max(g, b));
+            double min = Math.Min(r, Math.Min(g, b));
+            v = max;
+            double d = max - min;
+            s = max == 0 ? 0 : d / max;
+            h = 0;
+            if (max != min)
+            {
+                if (max == r) h = (g - b) / d + (g < b ? 6.0 : 0.0);
+                else if (max == g) h = (b - r) / d + 2.0;
+                else h = (r - g) / d + 4.0;
+                h /= 6.0;
+            }
+            h *= 360.0;
+        }
+
+        private Color ColorFromHsv(double h, double s, double v)
+        {
+            int hi = Convert.ToInt32(Math.Floor(h / 60)) % 6;
+            double f = h / 60 - Math.Floor(h / 60);
+
+            v = v * 255;
+            int vInt = Convert.ToInt32(v);
+            int p = Convert.ToInt32(v * (1 - s));
+            int q = Convert.ToInt32(v * (1 - f * s));
+            int t = Convert.ToInt32(v * (1 - (1 - f) * s));
+
+            if (hi == 0) return Color.FromArgb(255, vInt, t, p);
+            else if (hi == 1) return Color.FromArgb(255, q, vInt, p);
+            else if (hi == 2) return Color.FromArgb(255, p, vInt, t);
+            else if (hi == 3) return Color.FromArgb(255, p, q, vInt);
+            else if (hi == 4) return Color.FromArgb(255, t, p, vInt);
+            else return Color.FromArgb(255, vInt, p, q);
+        }
+
         private Point GetWheelCoordinatesFromColor(Color c, PictureBox pbox)
         {
             double r = c.R / 255.0;
@@ -2883,12 +3028,12 @@ namespace AmbilightControllerForm
 
             double max = Math.Max(r, Math.Max(g, b));
             double min = Math.Min(r, Math.Min(g, b));
-            double h = 0, s = 0, l = (max + min) / 2.0;
+            double h = 0, s = 0, v = max;
 
             if (max != min)
             {
                 double d = max - min;
-                s = l > 0.5 ? d / (2.0 - max - min) : d / (max + min);
+                s = max == 0 ? 0 : d / max;
                 if (max == r) h = (g - b) / d + (g < b ? 6 : 0);
                 else if (max == g) h = (b - r) / d + 2;
                 else if (max == b) h = (r - g) / d + 4;
