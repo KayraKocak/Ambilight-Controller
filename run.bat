@@ -1,5 +1,8 @@
 @echo off
 title Ambilight Controller Launcher
 
-:: Run the project
-dotnet run --project "%~dp0AmbilightControllerForm.csproj"
+:: Build the project if needed
+dotnet build "%~dp0AmbilightControllerForm.csproj"
+
+:: Run the executable directly detached from console
+start "" "%~dp0bin\Debug\net9.0-windows\AmbilightControllerForm.exe"

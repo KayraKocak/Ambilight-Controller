@@ -28,7 +28,10 @@ namespace AmbilightControllerForm
         private bool isRainbowActive = false;
         private int rainbowHue = 0;
         private AddressableAnimationType currentAnimationType = AddressableAnimationType.SolidRainbow;
-        private int animationTick = 0;
+        private double animationTime = 0.0;
+        private double animationSpeedMultiplier = 1.0;
+        private double animationScaleMultiplier = 1.0;
+        private Random random = new Random();
 
         // Hardware Streaming variables
         private SerialPort serialPort;
@@ -101,6 +104,13 @@ namespace AmbilightControllerForm
         private NumericUpDown numSmoothFrames;
         private Label lblSmoothFrames;
         private Label lblSmoothThreshold;
+        
+        private Form settingsForm = null;
+        private Form updateLogForm = null;
+
+        private Label lblCalibTitle;
+        private GlassButton btnCal1, btnCal2, btnCal3, btnCalR;
+        private GlassButton[] calBtns;
 
         // Addressable RGB Feature
         private bool isAddressableMode = false;
@@ -135,7 +145,7 @@ namespace AmbilightControllerForm
             get
             {
                 CreateParams cp = base.CreateParams;
-                cp.ExStyle |= 0x02000000; // WS_EX_COMPOSITED
+                // cp.ExStyle |= 0x02000000; // WS_EX_COMPOSITED (Removed due to massive CPU overhead)
                 return cp;
             }
         }
@@ -154,7 +164,10 @@ namespace AmbilightControllerForm
                 Bitmap bgImage = null;
                 await Task.Run(() =>
                 {
-                    using (Image img = Image.FromFile(bgPath))
+                    // Read file bytes into memory to prevent locking the BG.png file
+                    byte[] imageBytes = File.ReadAllBytes(bgPath);
+                    using (MemoryStream ms = new MemoryStream(imageBytes))
+                    using (Image img = Image.FromStream(ms))
                     {
                         // "Cover" mode: scale image so it fills the target area, cropping excess
                         float scaleX = (float)targetW / img.Width;
@@ -217,6 +230,200 @@ namespace AmbilightControllerForm
 
             // Asynchronously check for updates
             Task.Run(() => CheckForUpdates());
+        }
+
+        private void OpenSettingsForm()
+        {
+            if (settingsForm != null && !settingsForm.IsDisposed)
+            {
+                settingsForm.BringToFront();
+                return;
+            }
+
+            settingsForm = new Form
+            {
+                Size = new Size(300, 320),
+                FormBorderStyle = FormBorderStyle.None,
+                StartPosition = FormStartPosition.CenterParent,
+                BackColor = Color.FromArgb(19, 20, 23)
+            };
+
+            int preference = DWMWCP_ROUND;
+            DwmSetWindowAttribute(settingsForm.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
+
+            // Generate heavily blurred background
+            string bgPath = Path.Combine(Application.StartupPath, "BG.png");
+            if (File.Exists(bgPath))
+            {
+                try
+                {
+                    byte[] imageBytes = File.ReadAllBytes(bgPath);
+                    using (MemoryStream ms = new MemoryStream(imageBytes))
+                    using (Image img = Image.FromStream(ms))
+                    {
+                        int targetW = settingsForm.Width;
+                        int targetH = settingsForm.Height;
+                        float scaleX = (float)targetW / img.Width;
+                        float scaleY = (float)targetH / img.Height;
+                        float scale = Math.Max(scaleX, scaleY);
+                        int scaledW = (int)(img.Width * scale);
+                        int scaledH = (int)(img.Height * scale);
+                        int offsetX = (scaledW - targetW) / 2;
+                        int offsetY = (scaledH - targetH) / 2;
+
+                        int blurScale = 16;
+                        using (Bitmap small = new Bitmap(Math.Max(1, scaledW / blurScale), Math.Max(1, scaledH / blurScale)))
+                        {
+                            using (Graphics gs = Graphics.FromImage(small))
+                            {
+                                gs.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                gs.DrawImage(img, 0, 0, small.Width, small.Height);
+                            }
+                            Bitmap bgImage = new Bitmap(targetW, targetH);
+                            using (Graphics g2 = Graphics.FromImage(bgImage))
+                            {
+                                g2.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                g2.DrawImage(small, -offsetX, -offsetY, scaledW, scaledH);
+                                using (SolidBrush darkBrush = new SolidBrush(Color.FromArgb(200, 0, 0, 0)))
+                                {
+                                    g2.FillRectangle(darkBrush, 0, 0, bgImage.Width, bgImage.Height);
+                                }
+                            }
+                            settingsForm.BackgroundImage = bgImage;
+                            settingsForm.BackgroundImageLayout = ImageLayout.Stretch;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // Dragging mechanics
+            Point dragStart = Point.Empty;
+            settingsForm.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left && e.Y < 40) dragStart = e.Location; };
+            settingsForm.MouseMove += (s, e) => {
+                if (e.Button == MouseButtons.Left && dragStart != Point.Empty)
+                {
+                    settingsForm.Location = new Point(settingsForm.Left + e.X - dragStart.X, settingsForm.Top + e.Y - dragStart.Y);
+                }
+            };
+            settingsForm.MouseUp += (s, e) => dragStart = Point.Empty;
+
+            Label lblTitle = new Label { Text = "Settings", ForeColor = Color.White, Font = new Font("Segoe UI", 12f, FontStyle.Bold), Location = new Point(12, 12), AutoSize = true, BackColor = Color.Transparent };
+            settingsForm.Controls.Add(lblTitle);
+
+            GlassButton btnClose = new GlassButton { Text = "✕", Location = new Point(settingsForm.Width - 40, 10), Size = new Size(30, 30), BackColor = Color.FromArgb(50, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            btnClose.FlatAppearance.BorderSize = 0;
+            btnClose.Click += (s, e) => settingsForm.Close();
+            settingsForm.Controls.Add(btnClose);
+
+            // Reparent existing controls
+            btnModeToggle.Location = new Point(12, 50);
+            settingsForm.Controls.Add(btnModeToggle);
+
+            lblPixelCount.Location = new Point(12, 85);
+            settingsForm.Controls.Add(lblPixelCount);
+
+            numPixelCount.Location = new Point(75, 87);
+            settingsForm.Controls.Add(numPixelCount);
+
+            radInvertOrder.Location = new Point(12, 120);
+            settingsForm.Controls.Add(radInvertOrder);
+
+            btnAddressableSettings.Location = new Point(12, 150);
+            settingsForm.Controls.Add(btnAddressableSettings);
+
+            lblCalibTitle.Location = new Point(12, 190);
+            settingsForm.Controls.Add(lblCalibTitle);
+
+            btnCal1.Location = new Point(25, 222);
+            btnCal2.Location = new Point(65, 222);
+            btnCal3.Location = new Point(105, 222);
+            btnCalR.Location = new Point(145, 222);
+            settingsForm.Controls.AddRange(calBtns);
+
+            GlassButton btnUpdateLog = new GlassButton { Text = "Update Log", Location = new Point(12, 267), Size = new Size(116, 25), BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
+            btnUpdateLog.FlatAppearance.BorderSize = 0;
+            btnUpdateLog.Click += (s, e) => OpenUpdateLogForm();
+            settingsForm.Controls.Add(btnUpdateLog);
+
+            // Hide instead of close to preserve controls
+            settingsForm.FormClosing += (s, e) => {
+                if (e.CloseReason == CloseReason.UserClosing)
+                {
+                    e.Cancel = true;
+                    settingsForm.Hide();
+                }
+            };
+
+            settingsForm.StartPosition = FormStartPosition.Manual;
+            settingsForm.Location = new Point(this.Left + (this.Width - settingsForm.Width) / 2, this.Top + (this.Height - settingsForm.Height) / 2);
+            settingsForm.Show(this);
+        }
+
+        private void OpenUpdateLogForm()
+        {
+            if (updateLogForm != null && !updateLogForm.IsDisposed)
+            {
+                updateLogForm.BringToFront();
+                return;
+            }
+
+            updateLogForm = new Form
+            {
+                Size = new Size(400, 500),
+                FormBorderStyle = FormBorderStyle.None,
+                StartPosition = FormStartPosition.Manual,
+                BackColor = Color.FromArgb(19, 20, 23)
+            };
+
+            int preference = DWMWCP_ROUND;
+            DwmSetWindowAttribute(updateLogForm.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
+
+            Point dragStart = Point.Empty;
+            updateLogForm.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left && e.Y < 40) dragStart = e.Location; };
+            updateLogForm.MouseMove += (s, e) => {
+                if (e.Button == MouseButtons.Left && dragStart != Point.Empty)
+                {
+                    updateLogForm.Location = new Point(updateLogForm.Left + e.X - dragStart.X, updateLogForm.Top + e.Y - dragStart.Y);
+                }
+            };
+            updateLogForm.MouseUp += (s, e) => dragStart = Point.Empty;
+
+            Label lblTitle = new Label { Text = "Update Log", ForeColor = Color.White, Font = new Font("Segoe UI", 12f, FontStyle.Bold), Location = new Point(12, 12), AutoSize = true };
+            updateLogForm.Controls.Add(lblTitle);
+
+            GlassButton btnClose = new GlassButton { Text = "✕", Location = new Point(updateLogForm.Width - 40, 10), Size = new Size(30, 30), BackColor = Color.FromArgb(50, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            btnClose.FlatAppearance.BorderSize = 0;
+            btnClose.Click += (s, e) => updateLogForm.Close();
+            updateLogForm.Controls.Add(btnClose);
+
+            RichTextBox rtbLog = new RichTextBox
+            {
+                Location = new Point(12, 50),
+                Size = new Size(376, 438),
+                BackColor = Color.FromArgb(25, 26, 30),
+                ForeColor = Color.LightGray,
+                BorderStyle = BorderStyle.None,
+                ReadOnly = true,
+                Font = new Font("Consolas", 9f)
+            };
+
+            // Find the project root containing changelog.txt
+            string rootPath = AppDomain.CurrentDomain.BaseDirectory;
+            while (!string.IsNullOrEmpty(rootPath) && !File.Exists(Path.Combine(rootPath, "run.bat")))
+            {
+                rootPath = Path.GetDirectoryName(rootPath);
+            }
+            if (string.IsNullOrEmpty(rootPath)) rootPath = AppDomain.CurrentDomain.BaseDirectory;
+
+            string logPath = Path.Combine(rootPath, "changelog.txt");
+            if (File.Exists(logPath)) rtbLog.Text = File.ReadAllText(logPath);
+            else rtbLog.Text = "No changelog found.";
+
+            updateLogForm.Controls.Add(rtbLog);
+
+            updateLogForm.Location = new Point(this.Left + (this.Width - updateLogForm.Width) / 2, this.Top + (this.Height - updateLogForm.Height) / 2);
+            updateLogForm.Show(this);
         }
 
         private void CheckForUpdates()
@@ -674,10 +881,76 @@ namespace AmbilightControllerForm
 
             btnToggleAmbilight = CreateDashboardButton("AMBILIGHT", "Sync screen colors", 12, 92, false, 116);
             btnToggleAmbilight.Click += BtnToggleAmbilight_Click;
-
             btnRainbow = CreateDashboardButton("RAINBOW", "Slow spectrum cycle", 12, 148, false, 116);
             btnRainbow.Click += BtnRainbow_Click;
 
+            Label lblAnimSpeed = new Label
+            {
+                Text = "Anim Speed",
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 7f),
+                Location = new Point(12, 205),
+                AutoSize = true
+            };
+            leftPanel.Controls.Add(lblAnimSpeed);
+
+            GlassSlider sliderAnimSpeed = new GlassSlider
+            {
+                Location = new Point(12, 220),
+                Size = new Size(116, 20),
+                Minimum = 0,
+                Maximum = 100,
+                Value = 50
+            };
+            sliderAnimSpeed.Scroll += (s, e) =>
+            {
+                // Logarithmic mapping: 0 -> 0.25x, 50 -> 1.0x, 100 -> 4.0x
+                double exponent = -2.0 + (sliderAnimSpeed.Value / 100.0) * 4.0;
+                animationSpeedMultiplier = Math.Pow(2, exponent);
+            };
+            leftPanel.Controls.Add(sliderAnimSpeed);
+
+            Label lblAnimScale = new Label
+            {
+                Text = "Anim Scale",
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 7f),
+                Location = new Point(12, 245),
+                AutoSize = true
+            };
+            leftPanel.Controls.Add(lblAnimScale);
+
+            GlassSlider sliderAnimScale = new GlassSlider
+            {
+                Location = new Point(12, 260),
+                Size = new Size(116, 20),
+                Minimum = 0,
+                Maximum = 100,
+                Value = 50
+            };
+            sliderAnimScale.Scroll += (s, e) =>
+            {
+                // Logarithmic mapping: 0 -> 0.25x, 50 -> 1.0x, 100 -> 4.0x
+                double exponent = -2.0 + (sliderAnimScale.Value / 100.0) * 4.0;
+                animationScaleMultiplier = Math.Pow(2, exponent);
+            };
+            leftPanel.Controls.Add(sliderAnimScale);
+
+            GlassButton btnResetAnim = new GlassButton
+            {
+                Text = "Reset Sliders",
+                Location = new Point(12, 285),
+                Size = new Size(116, 25),
+                Font = new Font("Segoe UI", 7.5f)
+            };
+            btnResetAnim.Click += (s, e) => 
+            {
+                sliderAnimSpeed.Value = 50;
+                sliderAnimScale.Value = 50;
+            };
+            leftPanel.Controls.Add(btnResetAnim);
+
+            leftPanel.Controls.AddRange(new Control[] { btnOnOff, btnToggleAmbilight, btnRainbow });
             btnModeToggle = new GlassButton
             {
                 Text = "Generic RGB",
@@ -745,9 +1018,20 @@ namespace AmbilightControllerForm
                 Visible = false
             };
             btnAddressableSettings.FlatAppearance.BorderSize = 0;
-            btnAddressableSettings.Click += BtnAddressableSettings_Click;
+            GlassButton btnSettings = new GlassButton
+            {
+                Text = "⚙ Settings",
+                Location = new Point(12, 450),
+                Size = new Size(116, 25),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.White,
+                BackColor = Color.FromArgb(45, 46, 50),
+                Font = new Font("Segoe UI", 8f)
+            };
+            btnSettings.FlatAppearance.BorderSize = 0;
+            btnSettings.Click += (s, e) => OpenSettingsForm();
 
-            leftPanel.Controls.AddRange(new Control[] { btnOnOff, btnToggleAmbilight, btnRainbow, btnModeToggle, lblPixelCount, numPixelCount, radInvertOrder, btnAddressableSettings });
+            leftPanel.Controls.AddRange(new Control[] { btnOnOff, btnToggleAmbilight, btnRainbow, btnSettings });
             this.Controls.Add(leftPanel);
 
             LoadAddressableSettings();
@@ -1020,13 +1304,13 @@ namespace AmbilightControllerForm
             rightPanel.Controls.Add(btnAddPreset);
 
             // Calibration Header and Buttons
-            Label lblCalibTitle = CreateSectionHeader("CALIBRATION", 12, 497);
-            rightPanel.Controls.Add(lblCalibTitle);
+            lblCalibTitle = CreateSectionHeader("CALIBRATION", 12, 497);
+            // rightPanel.Controls.Add(lblCalibTitle);
 
-            GlassButton btnCal1 = new GlassButton { Location = new Point(25, 522), Size = new Size(25, 25), BackColor = ColorTranslator.FromHtml("#FFA777"), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
-            GlassButton btnCal2 = new GlassButton { Location = new Point(65, 522), Size = new Size(25, 25), BackColor = ColorTranslator.FromHtml("#FFD0A0"), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
-            GlassButton btnCal3 = new GlassButton { Location = new Point(105, 522), Size = new Size(25, 25), BackColor = ColorTranslator.FromHtml("#FFECE0"), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
-            GlassButton btnCalR = new GlassButton { Location = new Point(145, 522), Size = new Size(25, 25), BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand, Text = "R", Font = new Font("Segoe UI", 6f, FontStyle.Bold), ForeColor = Color.Black };
+            btnCal1 = new GlassButton { Location = new Point(25, 522), Size = new Size(25, 25), BackColor = ColorTranslator.FromHtml("#FFA777"), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
+            btnCal2 = new GlassButton { Location = new Point(65, 522), Size = new Size(25, 25), BackColor = ColorTranslator.FromHtml("#FFD0A0"), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
+            btnCal3 = new GlassButton { Location = new Point(105, 522), Size = new Size(25, 25), BackColor = ColorTranslator.FromHtml("#FFECE0"), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
+            btnCalR = new GlassButton { Location = new Point(145, 522), Size = new Size(25, 25), BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand, Text = "R", Font = new Font("Segoe UI", 6f, FontStyle.Bold), ForeColor = Color.Black };
             
             string calibPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "calib.txt");
             if (File.Exists(calibPath))
@@ -1078,7 +1362,7 @@ namespace AmbilightControllerForm
             btnCal2.BackColor = calibProfiles[1].Point100;
             btnCal3.BackColor = calibProfiles[2].Point100;
 
-            GlassButton[] calBtns = new GlassButton[] { btnCal1, btnCal2, btnCal3, btnCalR };
+            calBtns = new GlassButton[] { btnCal1, btnCal2, btnCal3, btnCalR };
             Action saveCalib = () => {
                 try {
                     string[] lines = new string[3];
@@ -1168,7 +1452,7 @@ namespace AmbilightControllerForm
             catch { }
             calibClick(calBtns[savedCalibIndex], EventArgs.Empty);
             
-            rightPanel.Controls.AddRange(calBtns);
+            // rightPanel.Controls.AddRange(calBtns);
 
             // Load presets from file or fall back to defaults
             string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "presets.txt");
@@ -1518,7 +1802,7 @@ namespace AmbilightControllerForm
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (GraphicsPath path = GetRoundedPath(panelVisualizer.ClientRectangle, 12))
             {
-                panelVisualizer.Region = new Region(path);
+                e.Graphics.SetClip(path);
             }
 
             if (isAddressableMode)
@@ -2078,14 +2362,16 @@ namespace AmbilightControllerForm
         {
             if (!isSystemOn) return;
 
-            animationTick++;
+            animationTime += animationSpeedMultiplier;
 
             if (isAddressableMode)
             {
+                int count = addressablePixelCount > 0 ? addressablePixelCount : 1;
+                
                 switch (currentAnimationType)
                 {
                     case AddressableAnimationType.SolidRainbow:
-                        rainbowHue = (rainbowHue + 1) % 360;
+                        rainbowHue = (int)(animationTime * 2) % 360;
                         Color c = ColorFromHsl(rainbowHue, 1.0, 0.5);
                         for (int i = 0; i < addressablePixelCount; i++) segmentColors[i] = c;
                         break;
@@ -2093,72 +2379,106 @@ namespace AmbilightControllerForm
                     case AddressableAnimationType.Wave:
                         for (int i = 0; i < addressablePixelCount; i++)
                         {
-                            int hue = (animationTick * 2 + i * 360 / (addressablePixelCount > 0 ? addressablePixelCount : 1)) % 360;
+                            int hue = (int)(animationTime * 4 + i * 360.0 / (count * animationScaleMultiplier)) % 360;
                             segmentColors[i] = ColorFromHsl(hue, 1.0, 0.5);
                         }
                         break;
                         
-                    case AddressableAnimationType.Chase:
+                    case AddressableAnimationType.DoubleWave:
                         for (int i = 0; i < addressablePixelCount; i++)
                         {
-                            int pos = (animationTick / 2) % (addressablePixelCount > 0 ? addressablePixelCount : 1);
-                            int dist = (i - pos + addressablePixelCount) % (addressablePixelCount > 0 ? addressablePixelCount : 1);
-                            if (dist < 5) segmentColors[i] = ColorFromHsl((animationTick) % 360, 1.0, 0.5 - (dist * 0.1));
-                            else segmentColors[i] = Color.Black;
+                            int distEdge = Math.Min(i, count - 1 - i);
+                            int hue = (int)(animationTime * 4 + distEdge * 360.0 / ((count / 2.0) * animationScaleMultiplier)) % 360;
+                            segmentColors[i] = ColorFromHsl(hue, 1.0, 0.5);
                         }
                         break;
                         
                     case AddressableAnimationType.Comet:
-                        int cometPos = (animationTick / 2) % ((addressablePixelCount > 0 ? addressablePixelCount : 1) * 2);
+                        double cometPos = (animationTime * 0.5) % (count * 2);
                         for (int i = 0; i < addressablePixelCount; i++)
                         {
-                            int dist = cometPos - i;
-                            if (dist >= 0 && dist < 10)
-                            {
-                                segmentColors[i] = ColorFromHsl((animationTick) % 360, 1.0, 0.5 * (1.0 - (dist / 10.0)));
-                            }
+                            double dist = cometPos - i;
+                            double tailLen = 10.0 * animationScaleMultiplier;
+                            double lumMod = 0;
+                            if (dist >= 0 && dist < tailLen) lumMod = 1.0 - (dist / tailLen);
+                            else if (dist > -1.0 && dist < 0) lumMod = 1.0 + dist;
+                            
+                            if (lumMod > 0) segmentColors[i] = ColorFromHsl((int)(animationTime * 2) % 360, 1.0, 0.5 * lumMod);
+                            else segmentColors[i] = Color.Black;
+                        }
+                        break;
+                        
+                    case AddressableAnimationType.DoubleComet:
+                        double cPos = (animationTime * 0.5) % (count / 2.0 + (10 * animationScaleMultiplier));
+                        for (int i = 0; i < addressablePixelCount; i++)
+                        {
+                            int distEdge = Math.Min(i, count - 1 - i);
+                            double dist = cPos - distEdge;
+                            double tailLen = 10.0 * animationScaleMultiplier;
+                            double lumMod = 0;
+                            if (dist >= 0 && dist < tailLen) lumMod = 1.0 - (dist / tailLen);
+                            else if (dist > -1.0 && dist < 0) lumMod = 1.0 + dist;
+                            
+                            if (lumMod > 0) segmentColors[i] = ColorFromHsl((int)(animationTime * 2) % 360, 1.0, 0.5 * lumMod);
                             else segmentColors[i] = Color.Black;
                         }
                         break;
                         
                     case AddressableAnimationType.Breathing:
-                        rainbowHue = (animationTick / 5) % 360;
-                        double lum = 0.1 + (Math.Sin(animationTick * 0.05) + 1.0) * 0.2; // 0.1 to 0.5
+                        rainbowHue = (int)(animationTime * 0.4) % 360;
+                        double lum = 0.1 + (Math.Sin(animationTime * 0.05) + 1.0) * 0.2; // 0.1 to 0.5
                         Color breathC = ColorFromHsl(rainbowHue, 1.0, lum);
                         for (int i = 0; i < addressablePixelCount; i++) segmentColors[i] = breathC;
                         break;
                         
                     case AddressableAnimationType.Sparkle:
-                        rainbowHue = (animationTick / 10) % 360;
+                        rainbowHue = (int)(animationTime * 0.2) % 360;
                         Color baseC = ColorFromHsl(rainbowHue, 1.0, 0.2);
-                        Random rnd = new Random();
                         for (int i = 0; i < addressablePixelCount; i++)
                         {
-                            if (rnd.Next(100) < 5) segmentColors[i] = Color.White;
+                            // Use consistent random threshold scaled by speed to keep sparkle density consistent
+                            if (random.NextDouble() < 0.05 * animationSpeedMultiplier) segmentColors[i] = Color.White;
                             else segmentColors[i] = baseC;
                         }
                         break;
                         
-                    case AddressableAnimationType.ColorWipe:
-                        int wipeHue = ((animationTick / (addressablePixelCount > 0 ? addressablePixelCount : 1)) * 45) % 360;
-                        int wipePos = animationTick % (addressablePixelCount > 0 ? addressablePixelCount : 1);
+                    case AddressableAnimationType.Fireplace:
                         for (int i = 0; i < addressablePixelCount; i++)
                         {
-                            if (i <= wipePos) segmentColors[i] = ColorFromHsl(wipeHue, 1.0, 0.5);
-                            else segmentColors[i] = Color.Black;
+                            // Fireplace: flickering between Hue 0 (Red) and Hue 35 (Yellow)
+                            // Use overlapping sine waves for pseudo-random smooth flickering
+                            double flicker = Math.Sin(animationTime * 0.15 + i * (0.7 / animationScaleMultiplier)) + 
+                                             Math.Sin(animationTime * 0.23 + i * (1.3 / animationScaleMultiplier)) +
+                                             Math.Sin(animationTime * 0.07 + i * (2.1 / animationScaleMultiplier));
+                            
+                            // Map flicker from [-3, 3] approx to [0, 1]
+                            flicker = (flicker + 3.0) / 6.0;
+                            
+                            int fHue = (int)(flicker * 35); // 0 to 35
+                            double fLum = 0.1 + flicker * 0.4; // 0.1 to 0.5
+                            
+                            segmentColors[i] = ColorFromHsl(fHue, 1.0, fLum);
                         }
                         break;
                 }
                 
+                // Update hardware
                 SendAddressableDataToHardware();
-                if (animationTick % 2 == 0) // Throttle UI redraw
-                {
-                    panelVisualizer.Invalidate();
-                }
+                
+                // Redraw UI at full 30 FPS
+                panelVisualizer.Invalidate();
             }
             else
             {
-                rainbowHue = (rainbowHue + 1) % 360;
+                // Classic mode rainbow
+                if (currentAnimationType == AddressableAnimationType.SolidRainbow)
+                {
+                    rainbowHue = (int)(animationTime * 2) % 360;
+                }
+                else
+                {
+                    rainbowHue = (rainbowHue + 1) % 360;
+                }
                 Color rgb = ColorFromHsl(rainbowHue, 1.0, 0.5);
                 UpdateActiveColor(rgb);
             }
@@ -2726,8 +3046,8 @@ namespace AmbilightControllerForm
                 animMenu.ForeColor = Color.White;
                 animMenu.Font = new Font("Segoe UI", 9f);
 
-                string[] names = { "Solid Rainbow", "Wave", "Chase", "Comet", "Breathing", "Sparkle", "Color Wipe" };
-                AddressableAnimationType[] types = { AddressableAnimationType.SolidRainbow, AddressableAnimationType.Wave, AddressableAnimationType.Chase, AddressableAnimationType.Comet, AddressableAnimationType.Breathing, AddressableAnimationType.Sparkle, AddressableAnimationType.ColorWipe };
+                string[] names = { "Solid Rainbow", "Wave", "Double Wave", "Comet", "Double Comet", "Breathing", "Sparkle", "Fireplace" };
+                AddressableAnimationType[] types = { AddressableAnimationType.SolidRainbow, AddressableAnimationType.Wave, AddressableAnimationType.DoubleWave, AddressableAnimationType.Comet, AddressableAnimationType.DoubleComet, AddressableAnimationType.Breathing, AddressableAnimationType.Sparkle, AddressableAnimationType.Fireplace };
 
                 for (int i = 0; i < names.Length; i++)
                 {
@@ -3377,11 +3697,12 @@ namespace AmbilightControllerForm
     {
         SolidRainbow,
         Wave,
-        Chase,
+        DoubleWave,
         Comet,
+        DoubleComet,
         Breathing,
         Sparkle,
-        ColorWipe
+        Fireplace
     }
 
     public class DarkMenuRenderer : ToolStripProfessionalRenderer

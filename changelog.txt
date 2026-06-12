@@ -1,0 +1,9 @@
+-Added settings button, moved led settings into the new settings panel.
+
+-Added update log.
+
+-Added new animations, animation speed and scale controls.
+
+-Improved performance
+
+-Startup console hidden
