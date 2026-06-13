@@ -108,6 +108,10 @@ namespace AmbilightControllerForm
         private Form settingsForm = null;
         private Form updateLogForm = null;
 
+        private GlassButton btnUpdateAvailable;
+        private System.Windows.Forms.Timer timerUpdateAnim;
+        private double updateAnimTime = 0.0;
+
         private Label lblCalibTitle;
         private GlassButton btnCal1, btnCal2, btnCal3, btnCalR;
         private GlassButton[] calBtns;
@@ -115,6 +119,8 @@ namespace AmbilightControllerForm
         // Addressable RGB Feature
         private bool isAddressableMode = false;
         private int addressablePixelCount = 20;
+        private string backgroundImageName = "BG.png";
+        private int backgroundBlur = 8;
         private Color[] segmentColors = new Color[500];
         private HashSet<int> selectedSegments = new HashSet<int>();
         private int lastHoveredSegment = -1;
@@ -150,64 +156,40 @@ namespace AmbilightControllerForm
             }
         }
 
-        private async void LoadAndBlurBackgroundAsync()
+        public async Task ApplyBackgroundAsync(bool applyToMain, bool applyToSettings)
         {
-            string bgPath = Path.Combine(Application.StartupPath, "BG.png");
+            string bgPath = Path.Combine(GetRootPath(), "BG", backgroundImageName);
+            if (!File.Exists(bgPath)) bgPath = Path.Combine(GetRootPath(), "BG.png"); // Fallback
             if (!File.Exists(bgPath)) return;
-
-            // Use actual rendered size, wait for layout to complete
-            int targetW = this.ClientSize.Width > 0 ? this.ClientSize.Width : 1000;
-            int targetH = this.ClientSize.Height > 0 ? this.ClientSize.Height : 680;
 
             try
             {
-                Bitmap bgImage = null;
-                await Task.Run(() =>
+                byte[] imageBytes = File.ReadAllBytes(bgPath);
+
+                if (applyToMain)
                 {
-                    // Read file bytes into memory to prevent locking the BG.png file
-                    byte[] imageBytes = File.ReadAllBytes(bgPath);
-                    using (MemoryStream ms = new MemoryStream(imageBytes))
-                    using (Image img = Image.FromStream(ms))
-                    {
-                        // "Cover" mode: scale image so it fills the target area, cropping excess
-                        float scaleX = (float)targetW / img.Width;
-                        float scaleY = (float)targetH / img.Height;
-                        float scale = Math.Max(scaleX, scaleY);
+                    int targetW = this.ClientSize.Width > 0 ? this.ClientSize.Width : 1000;
+                    int targetH = this.ClientSize.Height > 0 ? this.ClientSize.Height : 680;
+                    
+                    Bitmap bgImage = await ProcessBackgroundAsync(imageBytes, targetW, targetH, backgroundBlur, 130);
+                    
+                    if (this.BackgroundImage != null) this.BackgroundImage.Dispose();
+                    this.BackgroundImage = bgImage;
+                    this.BackgroundImageLayout = ImageLayout.Stretch;
+                }
 
-                        int scaledW = (int)(img.Width * scale);
-                        int scaledH = (int)(img.Height * scale);
-                        int offsetX = (scaledW - targetW) / 2;
-                        int offsetY = (scaledH - targetH) / 2;
-
-                        // Downscale for blur (1/8th of target), then upscale back: free gaussian blur
-                        int blurScale = 8;
-                        using (Bitmap small = new Bitmap(Math.Max(1, scaledW / blurScale), Math.Max(1, scaledH / blurScale)))
-                        {
-                            using (Graphics gs = Graphics.FromImage(small))
-                            {
-                                gs.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                                gs.DrawImage(img, 0, 0, small.Width, small.Height);
-                            }
-
-                            bgImage = new Bitmap(targetW, targetH);
-                            using (Graphics g2 = Graphics.FromImage(bgImage))
-                            {
-                                g2.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                                // Draw upscaled blurred image with cover-crop offset
-                                g2.DrawImage(small, -offsetX, -offsetY, scaledW, scaledH);
-
-                                // Dark overlay for contrast
-                                using (SolidBrush darkBrush = new SolidBrush(Color.FromArgb(130, 0, 0, 0)))
-                                {
-                                    g2.FillRectangle(darkBrush, 0, 0, bgImage.Width, bgImage.Height);
-                                }
-                            }
-                        }
-                    }
-                });
-
-                this.BackgroundImage = bgImage;
-                this.BackgroundImageLayout = ImageLayout.Stretch; // stretch the last few pixels to guarantee full coverage
+                if (applyToSettings && settingsForm != null && !settingsForm.IsDisposed)
+                {
+                    int targetW = settingsForm.Width > 0 ? settingsForm.Width : 300;
+                    int targetH = settingsForm.Height > 0 ? settingsForm.Height : 420; // 420 is the new height
+                    
+                    int settingsBlur = Math.Min(32, backgroundBlur + ((32 - backgroundBlur) / 2));
+                    Bitmap bgImage = await ProcessBackgroundAsync(imageBytes, targetW, targetH, settingsBlur, 200);
+                    
+                    if (settingsForm.BackgroundImage != null) settingsForm.BackgroundImage.Dispose();
+                    settingsForm.BackgroundImage = bgImage;
+                    settingsForm.BackgroundImageLayout = ImageLayout.Stretch;
+                }
             }
             catch (Exception ex)
             {
@@ -215,8 +197,53 @@ namespace AmbilightControllerForm
             }
         }
 
+        private async Task<Bitmap> ProcessBackgroundAsync(byte[] imageBytes, int targetW, int targetH, int blurScale, int darkAlpha)
+        {
+            return await Task.Run(() =>
+            {
+                using (MemoryStream ms = new MemoryStream(imageBytes))
+                using (Image img = Image.FromStream(ms))
+                {
+                    float scaleX = (float)targetW / img.Width;
+                    float scaleY = (float)targetH / img.Height;
+                    float scale = Math.Max(scaleX, scaleY);
+
+                    int scaledW = (int)(img.Width * scale);
+                    int scaledH = (int)(img.Height * scale);
+                    int offsetX = (scaledW - targetW) / 2;
+                    int offsetY = (scaledH - targetH) / 2;
+
+                    blurScale = Math.Max(1, blurScale);
+                    
+                    using (Bitmap small = new Bitmap(Math.Max(1, scaledW / blurScale), Math.Max(1, scaledH / blurScale)))
+                    {
+                        using (Graphics gs = Graphics.FromImage(small))
+                        {
+                            gs.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                            gs.DrawImage(img, 0, 0, small.Width, small.Height);
+                        }
+
+                        Bitmap bgImage = new Bitmap(targetW, targetH);
+                        using (Graphics g2 = Graphics.FromImage(bgImage))
+                        {
+                            g2.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                            g2.DrawImage(small, -offsetX, -offsetY, scaledW, scaledH);
+
+                            using (SolidBrush darkBrush = new SolidBrush(Color.FromArgb(darkAlpha, 0, 0, 0)))
+                            {
+                                g2.FillRectangle(darkBrush, 0, 0, bgImage.Width, bgImage.Height);
+                            }
+                        }
+                        return bgImage;
+                    }
+                }
+            });
+        }
+
         public Form1()
         {
+            loadedUnified = LoadUnifiedSettings(false);
+
             SetupCustomStyles();
             InitializeCustomComponents();
             InitializeAmbilightCurveUI();
@@ -226,23 +253,37 @@ namespace AmbilightControllerForm
             selectedWheelPoint = GetWheelCoordinatesFromColor(currentRgb, pboxColorWheel);
             UpdateActiveColor(currentRgb);
 
-            LoadAndBlurBackgroundAsync();
+            _ = ApplyBackgroundAsync(true, false);
 
             // Asynchronously check for updates
-            Task.Run(() => CheckForUpdates());
+            Task.Run(() => CheckForUpdatesLoop());
+
+            initDone = true;
+            MigrateLegacySettings();
+        }
+
+        private string GetRootPath()
+        {
+            string rootPath = AppDomain.CurrentDomain.BaseDirectory;
+            while (!string.IsNullOrEmpty(rootPath) && !File.Exists(Path.Combine(rootPath, "run.bat")))
+            {
+                rootPath = Path.GetDirectoryName(rootPath);
+            }
+            return string.IsNullOrEmpty(rootPath) ? AppDomain.CurrentDomain.BaseDirectory : rootPath;
         }
 
         private void OpenSettingsForm()
         {
             if (settingsForm != null && !settingsForm.IsDisposed)
             {
+                settingsForm.Show(this);
                 settingsForm.BringToFront();
                 return;
             }
 
             settingsForm = new Form
             {
-                Size = new Size(300, 320),
+                Size = new Size(300, 420),
                 FormBorderStyle = FormBorderStyle.None,
                 StartPosition = FormStartPosition.CenterParent,
                 BackColor = Color.FromArgb(19, 20, 23)
@@ -251,51 +292,7 @@ namespace AmbilightControllerForm
             int preference = DWMWCP_ROUND;
             DwmSetWindowAttribute(settingsForm.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
 
-            // Generate heavily blurred background
-            string bgPath = Path.Combine(Application.StartupPath, "BG.png");
-            if (File.Exists(bgPath))
-            {
-                try
-                {
-                    byte[] imageBytes = File.ReadAllBytes(bgPath);
-                    using (MemoryStream ms = new MemoryStream(imageBytes))
-                    using (Image img = Image.FromStream(ms))
-                    {
-                        int targetW = settingsForm.Width;
-                        int targetH = settingsForm.Height;
-                        float scaleX = (float)targetW / img.Width;
-                        float scaleY = (float)targetH / img.Height;
-                        float scale = Math.Max(scaleX, scaleY);
-                        int scaledW = (int)(img.Width * scale);
-                        int scaledH = (int)(img.Height * scale);
-                        int offsetX = (scaledW - targetW) / 2;
-                        int offsetY = (scaledH - targetH) / 2;
-
-                        int blurScale = 16;
-                        using (Bitmap small = new Bitmap(Math.Max(1, scaledW / blurScale), Math.Max(1, scaledH / blurScale)))
-                        {
-                            using (Graphics gs = Graphics.FromImage(small))
-                            {
-                                gs.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                                gs.DrawImage(img, 0, 0, small.Width, small.Height);
-                            }
-                            Bitmap bgImage = new Bitmap(targetW, targetH);
-                            using (Graphics g2 = Graphics.FromImage(bgImage))
-                            {
-                                g2.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                                g2.DrawImage(small, -offsetX, -offsetY, scaledW, scaledH);
-                                using (SolidBrush darkBrush = new SolidBrush(Color.FromArgb(200, 0, 0, 0)))
-                                {
-                                    g2.FillRectangle(darkBrush, 0, 0, bgImage.Width, bgImage.Height);
-                                }
-                            }
-                            settingsForm.BackgroundImage = bgImage;
-                            settingsForm.BackgroundImageLayout = ImageLayout.Stretch;
-                        }
-                    }
-                }
-                catch { }
-            }
+            _ = ApplyBackgroundAsync(false, true);
 
             // Dragging mechanics
             Point dragStart = Point.Empty;
@@ -313,7 +310,7 @@ namespace AmbilightControllerForm
 
             GlassButton btnClose = new GlassButton { Text = "✕", Location = new Point(settingsForm.Width - 40, 10), Size = new Size(30, 30), BackColor = Color.FromArgb(50, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             btnClose.FlatAppearance.BorderSize = 0;
-            btnClose.Click += (s, e) => settingsForm.Close();
+            btnClose.Click += (s, e) => settingsForm.Hide();
             settingsForm.Controls.Add(btnClose);
 
             // Reparent existing controls
@@ -346,6 +343,131 @@ namespace AmbilightControllerForm
             btnUpdateLog.Click += (s, e) => OpenUpdateLogForm();
             settingsForm.Controls.Add(btnUpdateLog);
 
+            ComboBox cbBackups = new ComboBox { Location = new Point(135, 267), Size = new Size(100, 25), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
+            GlassButton btnRevert = new GlassButton { Text = "Revert", Location = new Point(240, 267), Size = new Size(50, 25), BackColor = Color.FromArgb(180, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
+            btnRevert.FlatAppearance.BorderSize = 0;
+            
+            string rootPathForBackups = GetRootPath();
+
+            string backupsDir = Path.Combine(rootPathForBackups, "backups");
+            if (Directory.Exists(backupsDir))
+            {
+                var zips = Directory.GetFiles(backupsDir, "*.zip");
+                foreach (var z in zips) cbBackups.Items.Add(Path.GetFileName(z));
+                if (cbBackups.Items.Count > 0) cbBackups.SelectedIndex = 0;
+            }
+            if (cbBackups.Items.Count == 0)
+            {
+                cbBackups.Items.Add("No Backups");
+                cbBackups.SelectedIndex = 0;
+                cbBackups.Enabled = false;
+                btnRevert.Enabled = false;
+            }
+            
+            btnRevert.Click += (s, e) => {
+                if (cbBackups.Enabled && cbBackups.SelectedItem != null)
+                {
+                    if (MessageBox.Show($"Are you sure you want to revert to {cbBackups.SelectedItem}?", "Revert Backup", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+                    {
+                        string zipPath = Path.Combine(backupsDir, cbBackups.SelectedItem.ToString());
+                        string extractScript = Path.Combine(rootPathForBackups, "revert_backup.py");
+                        File.WriteAllText(extractScript, $@"
+import zipfile, os, time, shutil, subprocess
+time.sleep(1.5)
+with zipfile.ZipFile(r'{zipPath}', 'r') as zip_ref:
+    zip_ref.extractall('.')
+if os.path.exists('run.bat'):
+    subprocess.Popen(['cmd', '/c', 'start', 'run.bat'], shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE)
+");
+                        var psi = new System.Diagnostics.ProcessStartInfo { FileName = "python", Arguments = $"\"{extractScript}\"", UseShellExecute = true, WorkingDirectory = rootPathForBackups };
+                        System.Diagnostics.Process.Start(psi);
+                        Application.Exit();
+                    }
+                }
+            };
+            
+            settingsForm.Controls.Add(cbBackups);
+            settingsForm.Controls.Add(btnRevert);
+
+            Label lblBgSettings = new Label { Text = "Background Settings", ForeColor = Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold), Location = new Point(12, 305), AutoSize = true, BackColor = Color.Transparent };
+            settingsForm.Controls.Add(lblBgSettings);
+
+            ComboBox cbBgImages = new ComboBox { Location = new Point(12, 330), Size = new Size(130, 25), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
+            GlassButton btnAddBg = new GlassButton { Text = "Add Custom Image", Location = new Point(150, 330), Size = new Size(138, 25), BackColor = Color.FromArgb(50, 50, 60), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
+            btnAddBg.FlatAppearance.BorderSize = 0;
+            settingsForm.Controls.Add(cbBgImages);
+            settingsForm.Controls.Add(btnAddBg);
+
+            Label lblBgBlur = new Label { Text = "Background Blur", ForeColor = Color.White, Font = new Font("Segoe UI", 9f), Location = new Point(12, 365), AutoSize = true, BackColor = Color.Transparent };
+            settingsForm.Controls.Add(lblBgBlur);
+            
+            TrackBar tbBlur = new TrackBar { Minimum = 1, Maximum = 32, Value = Math.Max(1, Math.Min(32, backgroundBlur)), Location = new Point(120, 360), Size = new Size(168, 45), TickStyle = TickStyle.None };
+            settingsForm.Controls.Add(tbBlur);
+
+            bool isUpdatingDropdown = false;
+            Action populateDropdown = () => {
+                isUpdatingDropdown = true;
+                cbBgImages.Items.Clear();
+                string bgDir = Path.Combine(GetRootPath(), "BG");
+                if (Directory.Exists(bgDir))
+                {
+                    foreach (var f in Directory.GetFiles(bgDir)) {
+                        string fn = Path.GetFileName(f);
+                        if (fn.EndsWith(".png") || fn.EndsWith(".jpg") || fn.EndsWith(".jpeg")) cbBgImages.Items.Add(fn);
+                    }
+                    string customDir = Path.Combine(bgDir, "custom");
+                    if (Directory.Exists(customDir))
+                    {
+                        foreach (var f in Directory.GetFiles(customDir)) {
+                            string fn = Path.GetFileName(f);
+                            if (fn.EndsWith(".png") || fn.EndsWith(".jpg") || fn.EndsWith(".jpeg")) cbBgImages.Items.Add("custom/" + fn);
+                        }
+                    }
+                }
+                string currentBg = backgroundImageName.Replace("\\", "/");
+                if (cbBgImages.Items.Contains(currentBg)) cbBgImages.SelectedItem = currentBg;
+                else if (cbBgImages.Items.Count > 0) cbBgImages.SelectedIndex = 0;
+                isUpdatingDropdown = false;
+            };
+            populateDropdown();
+
+            cbBgImages.SelectedIndexChanged += (s, e) => {
+                if (isUpdatingDropdown) return;
+                if (cbBgImages.SelectedItem != null)
+                {
+                    backgroundImageName = cbBgImages.SelectedItem.ToString();
+                    SaveUnifiedSettings();
+                    _ = ApplyBackgroundAsync(true, true);
+                }
+            };
+
+            btnAddBg.Click += (s, e) => {
+                using (OpenFileDialog ofd = new OpenFileDialog { Filter = "Image Files|*.jpg;*.jpeg;*.png;*.bmp", Title = "Select Background Image" })
+                {
+                    if (ofd.ShowDialog() == DialogResult.OK)
+                    {
+                        try {
+                            string destDir = Path.Combine(GetRootPath(), "BG", "custom");
+                            if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
+                            string destPath = Path.Combine(destDir, Path.GetFileName(ofd.FileName));
+                            File.Copy(ofd.FileName, destPath, true);
+                            backgroundImageName = "custom/" + Path.GetFileName(destPath);
+                            populateDropdown();
+                            SaveUnifiedSettings();
+                            _ = ApplyBackgroundAsync(true, true);
+                        } catch (Exception ex) {
+                            MessageBox.Show("Failed to copy image: " + ex.Message);
+                        }
+                    }
+                }
+            };
+
+            tbBlur.Scroll += (s, e) => {
+                backgroundBlur = tbBlur.Value;
+                SaveUnifiedSettings();
+                _ = ApplyBackgroundAsync(true, true);
+            };
+
             // Hide instead of close to preserve controls
             settingsForm.FormClosing += (s, e) => {
                 if (e.CloseReason == CloseReason.UserClosing)
@@ -364,6 +486,7 @@ namespace AmbilightControllerForm
         {
             if (updateLogForm != null && !updateLogForm.IsDisposed)
             {
+                updateLogForm.Show(this);
                 updateLogForm.BringToFront();
                 return;
             }
@@ -394,7 +517,7 @@ namespace AmbilightControllerForm
 
             GlassButton btnClose = new GlassButton { Text = "✕", Location = new Point(updateLogForm.Width - 40, 10), Size = new Size(30, 30), BackColor = Color.FromArgb(50, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             btnClose.FlatAppearance.BorderSize = 0;
-            btnClose.Click += (s, e) => updateLogForm.Close();
+            btnClose.Click += (s, e) => updateLogForm.Hide();
             updateLogForm.Controls.Add(btnClose);
 
             RichTextBox rtbLog = new RichTextBox
@@ -422,76 +545,122 @@ namespace AmbilightControllerForm
 
             updateLogForm.Controls.Add(rtbLog);
 
+            updateLogForm.FormClosing += (s, e) => {
+                if (e.CloseReason == CloseReason.UserClosing)
+                {
+                    e.Cancel = true;
+                    updateLogForm.Hide();
+                }
+            };
+
             updateLogForm.Location = new Point(this.Left + (this.Width - updateLogForm.Width) / 2, this.Top + (this.Height - updateLogForm.Height) / 2);
             updateLogForm.Show(this);
         }
 
-        private void CheckForUpdates()
+        private async Task CheckForUpdatesLoop()
         {
-            try
+            while (true)
             {
-                // Walk up to find the project root containing updater.py and version.txt
-                string rootPath = AppDomain.CurrentDomain.BaseDirectory;
-                while (!string.IsNullOrEmpty(rootPath) && 
-                       !File.Exists(Path.Combine(rootPath, "updater.py")) && 
-                       !File.Exists(Path.Combine(rootPath, "run.bat")))
+                try
                 {
-                    rootPath = Path.GetDirectoryName(rootPath);
-                }
-                if (string.IsNullOrEmpty(rootPath))
-                {
-                    rootPath = AppDomain.CurrentDomain.BaseDirectory;
-                }
-
-                string localVersionStr = "1.0";
-                string versionPath = Path.Combine(rootPath, "version.txt");
-                if (File.Exists(versionPath))
-                {
-                    string content = File.ReadAllText(versionPath);
-                    var match = System.Text.RegularExpressions.Regex.Match(content, @"version:\s*([\d\.]+)");
-                    if (match.Success)
+                    // Walk up to find the project root containing updater.py and version.txt
+                    string rootPath = AppDomain.CurrentDomain.BaseDirectory;
+                    while (!string.IsNullOrEmpty(rootPath) && 
+                           !File.Exists(Path.Combine(rootPath, "updater.py")) && 
+                           !File.Exists(Path.Combine(rootPath, "run.bat")))
                     {
-                        localVersionStr = match.Groups[1].Value;
+                        rootPath = Path.GetDirectoryName(rootPath);
                     }
-                }
-
-                using (var client = new System.Net.Http.HttpClient())
-                {
-                    client.DefaultRequestHeaders.UserAgent.ParseAdd("AmbilightControllerUpdater");
-                    string remoteContent = client.GetStringAsync("https://raw.githubusercontent.com/KayraKocak/Ambilight-Controller/main/version.txt").Result;
-                    var match = System.Text.RegularExpressions.Regex.Match(remoteContent, @"version:\s*([\d\.]+)");
-                    if (match.Success)
+                    if (string.IsNullOrEmpty(rootPath))
                     {
-                        string remoteVersionStr = match.Groups[1].Value;
-                        if (double.TryParse(remoteVersionStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double remoteVersion) &&
-                            double.TryParse(localVersionStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double localVersion))
+                        rootPath = AppDomain.CurrentDomain.BaseDirectory;
+                    }
+
+                    string localVersionStr = "1.0";
+                    string versionPath = Path.Combine(rootPath, "version.txt");
+                    if (File.Exists(versionPath))
+                    {
+                        string content = File.ReadAllText(versionPath);
+                        var match = System.Text.RegularExpressions.Regex.Match(content, @"version:\s*([\d\.]+)");
+                        if (match.Success)
                         {
-                            if (remoteVersion > localVersion)
+                            localVersionStr = match.Groups[1].Value;
+                        }
+                    }
+
+                    using (var client = new System.Net.Http.HttpClient())
+                    {
+                        client.DefaultRequestHeaders.UserAgent.ParseAdd("AmbilightControllerUpdater");
+                        string remoteContent = await client.GetStringAsync("https://raw.githubusercontent.com/KayraKocak/Ambilight-Controller/main/version.txt");
+                        var match = System.Text.RegularExpressions.Regex.Match(remoteContent, @"version:\s*([\d\.]+)");
+                        if (match.Success)
+                        {
+                            string remoteVersionStr = match.Groups[1].Value;
+                            if (double.TryParse(remoteVersionStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double remoteVersion) &&
+                                double.TryParse(localVersionStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double localVersion))
                             {
-                                string updaterPath = Path.Combine(rootPath, "updater.py");
-                                if (File.Exists(updaterPath))
+                                if (remoteVersion > localVersion)
                                 {
-                                    var psi = new System.Diagnostics.ProcessStartInfo
+                                    string updaterPath = Path.Combine(rootPath, "updater.py");
+                                    if (File.Exists(updaterPath))
                                     {
-                                        FileName = "python",
-                                        Arguments = $"\"{updaterPath}\"",
-                                        UseShellExecute = true,
-                                        WorkingDirectory = rootPath
-                                    };
-                                    System.Diagnostics.Process.Start(psi);
-                                    
-                                    // Exit application to allow updates to run
-                                    Application.Exit();
+                                        this.Invoke(new Action(() => {
+                                            if (!btnUpdateAvailable.Visible)
+                                            {
+                                                btnUpdateAvailable.Visible = true;
+                                                timerUpdateAnim.Start();
+                                            }
+                                        }));
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                catch
+                {
+                    // Fail silently to avoid interrupting normal usage if offline
+                }
+
+                // Check every 5 minutes
+                await Task.Delay(TimeSpan.FromMinutes(5));
             }
-            catch
+        }
+
+        private void BtnUpdateAvailable_Click(object sender, EventArgs e)
+        {
+            if (MessageBox.Show("Do you want to update?", "Update Available", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
             {
-                // Fail silently to avoid interrupting normal usage if offline
+                string rootPath = AppDomain.CurrentDomain.BaseDirectory;
+                while (!string.IsNullOrEmpty(rootPath) && !File.Exists(Path.Combine(rootPath, "updater.py")))
+                {
+                    rootPath = Path.GetDirectoryName(rootPath);
+                }
+                if (string.IsNullOrEmpty(rootPath)) rootPath = AppDomain.CurrentDomain.BaseDirectory;
+
+                string updaterPath = Path.Combine(rootPath, "updater.py");
+                if (File.Exists(updaterPath))
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "python",
+                        Arguments = $"\"{updaterPath}\"",
+                        UseShellExecute = true,
+                        WorkingDirectory = rootPath
+                    };
+                    System.Diagnostics.Process.Start(psi);
+                    Application.Exit();
+                }
             }
+        }
+
+        private void TimerUpdateAnim_Tick(object sender, EventArgs e)
+        {
+            updateAnimTime += 0.1;
+            int h = (int)(updateAnimTime * 20) % 360;
+            // Pulsing rainbow effect
+            btnUpdateAvailable.BackColor = ColorFromHsl(h, 1.0, 0.3);
+            btnUpdateAvailable.FlatAppearance.BorderColor = ColorFromHsl(h, 1.0, 0.6);
         }
 
         private Bitmap GenerateAddressablePreview(Color[] colors, int width, int height)
@@ -539,43 +708,12 @@ namespace AmbilightControllerForm
 
         private void SavePresets()
         {
-            if (presetsFlow == null) return;
-            try
-            {
-                string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "presets.txt");
-                List<string> hexList = new List<string>();
-                foreach (Control ctrl in presetsFlow.Controls)
-                {
-                    if (ctrl is GlassButton btn)
-                    {
-                        if (btn.Tag is Color[] addrColors)
-                        {
-                            System.Text.StringBuilder sb = new System.Text.StringBuilder("ADDR:");
-                            for (int i = 0; i < addrColors.Length; i++)
-                            {
-                                sb.Append($"#{addrColors[i].R:X2}{addrColors[i].G:X2}{addrColors[i].B:X2}");
-                                if (i < addrColors.Length - 1) sb.Append(",");
-                            }
-                            hexList.Add(sb.ToString());
-                        }
-                        else
-                        {
-                            Color c = btn.BackColor;
-                            string hex = $"#{c.R:X2}{c.G:X2}{c.B:X2}";
-                            hexList.Add(hex);
-                        }
-                    }
-                }
-                File.WriteAllLines(filePath, hexList);
-            }
-            catch
-            {
-                // Fail silently (e.g. read-only filesystem or access restrictions)
-            }
+            SaveUnifiedSettings();
         }
 
         private void LoadAmbilightCurve()
         {
+            if (loadedUnified) return;
             try
             {
                 string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ambilight_curve.txt");
@@ -609,23 +747,12 @@ namespace AmbilightControllerForm
 
         private void SaveAmbilightCurve()
         {
-            try
-            {
-                string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ambilight_curve.txt");
-                var ic = System.Globalization.CultureInfo.InvariantCulture;
-                string content = string.Join(",", new string[] {
-                    ambilightCurve[0].ToString(ic),    ambilightCurve[1].ToString(ic),
-                    ambilightCurve[2].ToString(ic),    ambilightCurve[3].ToString(ic),
-                    ambilightSatCurve[0].ToString(ic), ambilightSatCurve[1].ToString(ic),
-                    ambilightSatCurve[2].ToString(ic), ambilightSatCurve[3].ToString(ic)
-                });
-                File.WriteAllText(path, content);
-            }
-            catch { }
+            SaveUnifiedSettings();
         }
 
         private void LoadSmoothSettings()
         {
+            if (loadedUnified) return;
             try
             {
                 string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "smooth_settings.txt");
@@ -644,16 +771,12 @@ namespace AmbilightControllerForm
 
         private void SaveSmoothSettings()
         {
-            try
-            {
-                string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "smooth_settings.txt");
-                File.WriteAllText(path, $"{currentSmoothThreshold},{currentSmoothFrames}");
-            }
-            catch { }
+            SaveUnifiedSettings();
         }
 
         private void LoadAddressableSettings()
         {
+            if (loadedUnified) return;
             try
             {
                 string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "addressable_settings.txt");
@@ -695,28 +818,7 @@ namespace AmbilightControllerForm
 
         private void SaveAddressableSettings()
         {
-            try
-            {
-                string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "addressable_settings.txt");
-                File.WriteAllLines(path, new string[] {
-                    isAddressableMode.ToString(),
-                    addressablePixelCount.ToString(),
-                    invertPixelOrder.ToString()
-                });
-
-                if (addressableCaptureAreas != null && addressableCaptureAreas.Length == addressablePixelCount)
-                {
-                    string areasPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "addressable_areas.txt");
-                    string[] lines = new string[addressablePixelCount];
-                    for (int i = 0; i < addressablePixelCount; i++)
-                    {
-                        Rectangle r = addressableCaptureAreas[i];
-                        lines[i] = $"{r.X},{r.Y},{r.Width},{r.Height}";
-                    }
-                    File.WriteAllLines(areasPath, lines);
-                }
-            }
-            catch { }
+            SaveUnifiedSettings();
         }
 
         private void InitializeAmbilightCurveUI()
@@ -858,10 +960,18 @@ namespace AmbilightControllerForm
             lblTitle.MouseMove += (s, e) => TitleBar_MouseMove(titleBar, e);
             lblTitle.MouseUp += (s, e) => TitleBar_MouseUp(titleBar, e);
 
-            btnClose = CreateTitleBarButton("✕", this.Width - 36, Color.FromArgb(232, 17, 35));
+            btnClose = new GlassButton { Text = "✕", Font = new Font("Segoe UI", 9f, FontStyle.Bold), ForeColor = Color.FromArgb(255, 40, 60), BackColor = Color.Transparent, Location = new Point(this.Width - 80, 0), Size = new Size(80, 40), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
+            btnClose.GlassPadding = new Padding(10, 5, 10, 5);
+            btnClose.BorderColor = Color.FromArgb(255, 40, 60);
+            btnClose.GlowColor = Color.FromArgb(255, 40, 60);
+            btnClose.PermanentGlow = true;
             btnClose.Click += (s, e) => this.Close();
 
-            btnMin = CreateTitleBarButton("—", this.Width - 68, Color.FromArgb(40, 40, 40));
+            btnMin = new GlassButton { Text = "—", Font = new Font("Segoe UI", 9f, FontStyle.Bold), ForeColor = Color.FromArgb(40, 255, 80), BackColor = Color.Transparent, Location = new Point(this.Width - 160, 0), Size = new Size(80, 40), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
+            btnMin.GlassPadding = new Padding(10, 5, 10, 5);
+            btnMin.BorderColor = Color.FromArgb(40, 255, 80);
+            btnMin.GlowColor = Color.FromArgb(40, 255, 80);
+            btnMin.PermanentGlow = true;
             btnMin.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
 
             titleBar.Controls.AddRange(new Control[] { lblTitle, btnClose, btnMin });
@@ -1312,50 +1422,53 @@ namespace AmbilightControllerForm
             btnCal3 = new GlassButton { Location = new Point(105, 522), Size = new Size(25, 25), BackColor = ColorTranslator.FromHtml("#FFECE0"), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
             btnCalR = new GlassButton { Location = new Point(145, 522), Size = new Size(25, 25), BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand, Text = "R", Font = new Font("Segoe UI", 6f, FontStyle.Bold), ForeColor = Color.Black };
             
-            string calibPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "calib.txt");
-            if (File.Exists(calibPath))
+            if (!loadedUnified)
             {
-                try {
-                    string[] calibLines = File.ReadAllLines(calibPath);
-                    for (int i = 0; i < 3 && i < calibLines.Length; i++)
-                    {
-                        string[] parts = calibLines[i].Split(',');
-                        if (parts.Length >= 5)
+                string calibPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "calib.txt");
+                if (File.Exists(calibPath))
+                {
+                    try {
+                        string[] calibLines = File.ReadAllLines(calibPath);
+                        for (int i = 0; i < 3 && i < calibLines.Length; i++)
                         {
-                            calibProfiles[i].Point100 = ColorTranslator.FromHtml(parts[0]);
-                            calibProfiles[i].Point60 = ColorTranslator.FromHtml(parts[1]);
-                            calibProfiles[i].Point30 = ColorTranslator.FromHtml(parts[2]);
-                            calibProfiles[i].Point5 = ColorTranslator.FromHtml(parts[3]);
-                            calibProfiles[i].PointMin = ColorTranslator.FromHtml(parts[4]);
+                            string[] parts = calibLines[i].Split(',');
+                            if (parts.Length >= 5)
+                            {
+                                calibProfiles[i].Point100 = ColorTranslator.FromHtml(parts[0]);
+                                calibProfiles[i].Point60 = ColorTranslator.FromHtml(parts[1]);
+                                calibProfiles[i].Point30 = ColorTranslator.FromHtml(parts[2]);
+                                calibProfiles[i].Point5 = ColorTranslator.FromHtml(parts[3]);
+                                calibProfiles[i].PointMin = ColorTranslator.FromHtml(parts[4]);
+                            }
+                            else if (parts.Length == 4)
+                            {
+                                calibProfiles[i].Point100 = ColorTranslator.FromHtml(parts[0]);
+                                calibProfiles[i].Point60 = ColorTranslator.FromHtml(parts[1]); // Point50 renamed to Point60
+                                calibProfiles[i].Point30 = ColorTranslator.FromHtml(parts[2]);
+                                calibProfiles[i].Point5 = ColorTranslator.FromHtml(parts[3]);
+                                calibProfiles[i].PointMin = Color.FromArgb(0, 0, 0);
+                            }
+                            else if (parts.Length == 3)
+                            {
+                                calibProfiles[i].Point100 = ColorTranslator.FromHtml(parts[0]);
+                                calibProfiles[i].Point60 = ColorTranslator.FromHtml(parts[1]); // Point50 renamed to Point60
+                                calibProfiles[i].Point5 = ColorTranslator.FromHtml(parts[2]);
+                                calibProfiles[i].PointMin = Color.FromArgb(0, 0, 0);
+                                
+                                // Interpolate Point30 (formerly Point31) between Point5 and Point60 at v = 76
+                                float t = 76f / 153f;
+                                int r = (int)(calibProfiles[i].Point5.R + (calibProfiles[i].Point60.R - calibProfiles[i].Point5.R) * t);
+                                int g = (int)(calibProfiles[i].Point5.G + (calibProfiles[i].Point60.G - calibProfiles[i].Point5.G) * t);
+                                int b = (int)(calibProfiles[i].Point5.B + (calibProfiles[i].Point60.B - calibProfiles[i].Point5.B) * t);
+                                calibProfiles[i].Point30 = Color.FromArgb(
+                                    Math.Min(255, Math.Max(0, r)),
+                                    Math.Min(255, Math.Max(0, g)),
+                                    Math.Min(255, Math.Max(0, b))
+                                );
+                            }
                         }
-                        else if (parts.Length == 4)
-                        {
-                            calibProfiles[i].Point100 = ColorTranslator.FromHtml(parts[0]);
-                            calibProfiles[i].Point60 = ColorTranslator.FromHtml(parts[1]); // Point50 renamed to Point60
-                            calibProfiles[i].Point30 = ColorTranslator.FromHtml(parts[2]);
-                            calibProfiles[i].Point5 = ColorTranslator.FromHtml(parts[3]);
-                            calibProfiles[i].PointMin = Color.FromArgb(0, 0, 0);
-                        }
-                        else if (parts.Length == 3)
-                        {
-                            calibProfiles[i].Point100 = ColorTranslator.FromHtml(parts[0]);
-                            calibProfiles[i].Point60 = ColorTranslator.FromHtml(parts[1]); // Point50 renamed to Point60
-                            calibProfiles[i].Point5 = ColorTranslator.FromHtml(parts[2]);
-                            calibProfiles[i].PointMin = Color.FromArgb(0, 0, 0);
-                            
-                            // Interpolate Point30 (formerly Point31) between Point5 and Point60 at v = 76
-                            float t = 76f / 153f;
-                            int r = (int)(calibProfiles[i].Point5.R + (calibProfiles[i].Point60.R - calibProfiles[i].Point5.R) * t);
-                            int g = (int)(calibProfiles[i].Point5.G + (calibProfiles[i].Point60.G - calibProfiles[i].Point5.G) * t);
-                            int b = (int)(calibProfiles[i].Point5.B + (calibProfiles[i].Point60.B - calibProfiles[i].Point5.B) * t);
-                            calibProfiles[i].Point30 = Color.FromArgb(
-                                Math.Min(255, Math.Max(0, r)),
-                                Math.Min(255, Math.Max(0, g)),
-                                Math.Min(255, Math.Max(0, b))
-                            );
-                        }
-                    }
-                } catch { }
+                    } catch { }
+                }
             }
 
             btnCal1.BackColor = calibProfiles[0].Point100;
@@ -1364,18 +1477,7 @@ namespace AmbilightControllerForm
 
             calBtns = new GlassButton[] { btnCal1, btnCal2, btnCal3, btnCalR };
             Action saveCalib = () => {
-                try {
-                    string[] lines = new string[3];
-                    for (int i = 0; i < 3; i++) {
-                        string p100 = $"#{calibProfiles[i].Point100.R:X2}{calibProfiles[i].Point100.G:X2}{calibProfiles[i].Point100.B:X2}";
-                        string p60 = $"#{calibProfiles[i].Point60.R:X2}{calibProfiles[i].Point60.G:X2}{calibProfiles[i].Point60.B:X2}";
-                        string p30 = $"#{calibProfiles[i].Point30.R:X2}{calibProfiles[i].Point30.G:X2}{calibProfiles[i].Point30.B:X2}";
-                        string p5 = $"#{calibProfiles[i].Point5.R:X2}{calibProfiles[i].Point5.G:X2}{calibProfiles[i].Point5.B:X2}";
-                        string pMin = $"#{calibProfiles[i].PointMin.R:X2}{calibProfiles[i].PointMin.G:X2}{calibProfiles[i].PointMin.B:X2}";
-                        lines[i] = $"{p100},{p60},{p30},{p5},{pMin}";
-                    }
-                    File.WriteAllLines(calibPath, lines);
-                } catch { }
+                SaveUnifiedSettings();
             };
 
             EventHandler calibClick = (s, e) => {
@@ -1388,12 +1490,7 @@ namespace AmbilightControllerForm
                     b.FlatAppearance.BorderColor = (b == clicked) ? Color.FromArgb(0, 210, 255) : Color.FromArgb(60, 60, 60);
                 }
 
-                try
-                {
-                    string idxPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "last_calib.txt");
-                    File.WriteAllText(idxPath, idx.ToString());
-                }
-                catch { }
+                SaveUnifiedSettings();
             };
             MouseEventHandler calibMouseDown = (s, e) => {
                 GlassButton btn = (GlassButton)s;
@@ -1437,44 +1534,59 @@ namespace AmbilightControllerForm
             }
 
             // Load and apply last selected calibration preset index
+            // Load and apply last selected calibration preset index
             int savedCalibIndex = 3; // Default to Reset ("R")
-            try
+            if (loadedUnified && loadedSavedCalibIndex.HasValue)
             {
-                string idxPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "last_calib.txt");
-                if (File.Exists(idxPath))
+                savedCalibIndex = loadedSavedCalibIndex.Value;
+            }
+            else if (!loadedUnified)
+            {
+                try
                 {
-                    if (int.TryParse(File.ReadAllText(idxPath), out int savedIdx) && savedIdx >= 0 && savedIdx < calBtns.Length)
+                    string idxPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "last_calib.txt");
+                    if (File.Exists(idxPath))
                     {
-                        savedCalibIndex = savedIdx;
+                        if (int.TryParse(File.ReadAllText(idxPath), out int savedIdx) && savedIdx >= 0 && savedIdx < calBtns.Length)
+                        {
+                            savedCalibIndex = savedIdx;
+                        }
                     }
                 }
+                catch { }
             }
-            catch { }
             calibClick(calBtns[savedCalibIndex], EventArgs.Empty);
             
             // rightPanel.Controls.AddRange(calBtns);
 
             // Load presets from file or fall back to defaults
-            string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "presets.txt");
             string[] presetHexes;
-            if (File.Exists(filePath))
+            if (loadedUnified && loadedPresets != null && loadedPresets.Length == 16)
             {
-                try
+                presetHexes = loadedPresets;
+            }
+            else
+            {
+                string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "presets.txt");
+                if (File.Exists(filePath))
                 {
-                    presetHexes = File.ReadAllLines(filePath);
-                    if (presetHexes.Length != 16)
+                    try
+                    {
+                        presetHexes = File.ReadAllLines(filePath);
+                        if (presetHexes.Length != 16)
+                        {
+                            presetHexes = GetDefaultPresets();
+                        }
+                    }
+                    catch
                     {
                         presetHexes = GetDefaultPresets();
                     }
                 }
-                catch
+                else
                 {
                     presetHexes = GetDefaultPresets();
                 }
-            }
-            else
-            {
-                presetHexes = GetDefaultPresets();
             }
 
             // Context Menu for right-click edit/clear options
@@ -1754,6 +1866,30 @@ namespace AmbilightControllerForm
             };
             this.Controls.Add(lblVersion);
             lblVersion.BringToFront();
+
+            // ==========================================
+            // 7. ANIMATED UPDATE BUTTON
+            // ==========================================
+            btnUpdateAvailable = new GlassButton
+            {
+                Text = "Update Available!",
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Location = new Point((this.Width - 140) / 2, this.Height - 45), // Middle-bottom
+                Size = new Size(140, 30),
+                BackColor = Color.FromArgb(30, 30, 35),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                Visible = false // Hidden initially
+            };
+            btnUpdateAvailable.FlatAppearance.BorderSize = 1;
+            btnUpdateAvailable.FlatAppearance.BorderColor = Color.FromArgb(60, 60, 60);
+            btnUpdateAvailable.Click += BtnUpdateAvailable_Click;
+            this.Controls.Add(btnUpdateAvailable);
+            btnUpdateAvailable.BringToFront();
+
+            timerUpdateAnim = new System.Windows.Forms.Timer { Interval = 30 };
+            timerUpdateAnim.Tick += TimerUpdateAnim_Tick;
         }
 
         // ==========================================================================

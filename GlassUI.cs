@@ -287,6 +287,8 @@ namespace AmbilightControllerForm
         public Color GlowColor { get; set; } = Color.Transparent;
         public Color BorderColor { get; set; } = Color.FromArgb(100, 255, 255, 255);
         public float BorderThickness { get; set; } = 1f;
+        public bool PermanentGlow { get; set; } = false;
+        public Padding GlassPadding { get; set; } = new Padding(1);
 
         private Image _glassImage;
 
@@ -330,7 +332,7 @@ namespace AmbilightControllerForm
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-            Rectangle rect = new Rectangle(1, 1, this.Width - 2, this.Height - 2);
+            Rectangle rect = new Rectangle(GlassPadding.Left, GlassPadding.Top, this.Width - GlassPadding.Left - GlassPadding.Right, this.Height - GlassPadding.Top - GlassPadding.Bottom);
             using (GraphicsPath path = GetRoundedPath(rect, BorderRadius))
             {
                 if (_glassImage != null)
@@ -341,32 +343,44 @@ namespace AmbilightControllerForm
                 }
                 else
                 {
-                    // Fill
-                    Color fillColor = GlassColor;
-                    if (_isPressed)
+                    if (GlassColor.A > 0)
                     {
-                        fillColor = ControlPaint.Dark(GlassColor, 0.1f);
-                    }
-                    else if (_isHovered)
-                    {
-                        fillColor = ControlPaint.Light(GlassColor, 0.2f);
-                    }
+                        Color fillColor = GlassColor;
+                        if (_isPressed)
+                        {
+                            fillColor = ControlPaint.Dark(GlassColor, 0.1f);
+                        }
+                        else if (_isHovered)
+                        {
+                            fillColor = ControlPaint.Light(GlassColor, 0.2f);
+                        }
 
-                    using (SolidBrush brush = new SolidBrush(fillColor))
-                    {
-                        e.Graphics.FillPath(brush, path);
+                        using (SolidBrush brush = new SolidBrush(fillColor))
+                        {
+                            e.Graphics.FillPath(brush, path);
+                        }
                     }
                 }
 
                 // Border/Glow
-                if (GlowColor != Color.Transparent && (_isHovered || _isPressed))
+                if (GlowColor != Color.Transparent && (PermanentGlow || _isHovered || _isPressed))
                 {
-                    using (Pen glowPen = new Pen(Color.FromArgb(80, GlowColor), 2f))
+                    int glowSteps = (_isHovered || _isPressed) ? 6 : 5;
+                    float baseAlpha = (_isHovered || _isPressed) ? 160f : 120f;
+                    
+                    for (int i = 1; i <= glowSteps; i++)
                     {
-                        e.Graphics.DrawPath(glowPen, path);
+                        int alpha = (int)(baseAlpha * (1f - ((float)i / glowSteps)));
+                        if (alpha <= 0) continue;
+                        using (Pen glowPen = new Pen(Color.FromArgb(alpha, GlowColor), i * 2f))
+                        {
+                            glowPen.LineJoin = LineJoin.Round;
+                            e.Graphics.DrawPath(glowPen, path);
+                        }
                     }
                 }
-                else if (BorderThickness > 0)
+                
+                if (BorderThickness > 0)
                 {
                     using (Pen borderPen = new Pen(BorderColor, BorderThickness))
                     {

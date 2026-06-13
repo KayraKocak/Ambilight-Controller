@@ -1,9 +1,11 @@
--Added settings button, moved led settings into the new settings panel.
+- Custom Backgrounds: Added background image system. The app now features support for importing your own custom images directly through the Settings panel.
 
--Added update log.
+- Update Notification System: Added a dynamic, animated "Update Available" button that elegantly slides in with a pulsing rainbow aura whenever a new update is pushed.
 
--Added new animations, animation speed and scale controls.
+- Automated Backups & Reversions: The system now creates automatic ZIP backups of your project before updating (keeping the 3 most recent backups). You can revert to any past backup from Settings
 
--Improved performance
+- Unified Settings System: Merged fragmented config text files into a single `settings.txt` architecture.
 
--Startup console hidden
+- Reusable Forms Fix: Fixed a bug involving settings panel.
+
+- Neon Effects: Improved visuals of Minimize and Close App buttons.
