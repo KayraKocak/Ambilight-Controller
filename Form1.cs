@@ -847,6 +847,9 @@ if os.path.exists('run.bat'):
                     ambilightCurve[i]    = brightVals[i];
                     ambilightSatCurve[i] = satVals[i];
                 }
+            };
+            curveGraph.ValuesCommitted += (brightVals, satVals) =>
+            {
                 SaveAmbilightCurve();
             };
 
@@ -2805,9 +2808,13 @@ if os.path.exists('run.bat'):
 
             if (lblDataPacket != null && lblDataPacket.IsHandleCreated)
             {
-                lblDataPacket.BeginInvoke(new Action(() => {
-                    lblDataPacket.Text = $"PACKET: [{data.Length} bytes]";
-                }));
+                string expectedText = $"PACKET: [{data.Length} bytes]";
+                if (lblDataPacket.Text != expectedText)
+                {
+                    lblDataPacket.BeginInvoke(new Action(() => {
+                        lblDataPacket.Text = expectedText;
+                    }));
+                }
             }
         }
 
@@ -3083,7 +3090,9 @@ if os.path.exists('run.bat'):
             }
 
             // Trigger main form redraw so that the ambient glow is repainted
-            this.Invalidate();
+            Rectangle rect = panelVisualizer.Bounds;
+            rect.Inflate(24, 24); // Give plenty of room for the glow radius
+            this.Invalidate(rect);
 
             // Stream to hardware
             if (streamToHardware)
@@ -3551,6 +3560,7 @@ if os.path.exists('run.bat'):
 
         // Fired whenever any point moves
         public event Action<float[], float[]> ValuesChanged;
+        public event Action<float[], float[]> ValuesCommitted;
 
         public BrightnessSaturationGraph()
         {
@@ -3649,6 +3659,10 @@ if os.path.exists('run.bat'):
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (_dragging >= 0)
+            {
+                ValuesCommitted?.Invoke((float[])_bx.Clone(), (float[])_sy.Clone());
+            }
             _dragging = -1;
             Cursor = _hoverPt >= 0 ? Cursors.SizeAll : Cursors.Default;
         }
