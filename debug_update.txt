@@ -1,0 +1,3 @@
+Update found. UpdaterPath: C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\updater.py, Exists: True
+Update found. UpdaterPath: C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\updater.py, Exists: True
+Update found. UpdaterPath: C:\Users\Kayra\.gemini\antigravity\scratch\AmbilightControllerForm\updater.py, Exists: True

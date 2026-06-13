@@ -4,3 +4,5 @@ bin/
 obj/
 *.user
 dxgi_error.txt
+
+BG/custom/

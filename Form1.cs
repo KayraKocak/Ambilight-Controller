@@ -604,10 +604,16 @@ if os.path.exists('run.bat'):
                                     string updaterPath = Path.Combine(rootPath, "updater.py");
                                     if (File.Exists(updaterPath))
                                     {
+                                        while (!this.IsHandleCreated)
+                                        {
+                                            await Task.Delay(100);
+                                        }
                                         this.Invoke(new Action(() => {
                                             if (!btnUpdateAvailable.Visible)
                                             {
+                                                btnUpdateAvailable.Location = new Point((this.Width - btnUpdateAvailable.Width) / 2, this.Height - 75);
                                                 btnUpdateAvailable.Visible = true;
+                                                btnUpdateAvailable.BringToFront();
                                                 timerUpdateAnim.Start();
                                             }
                                         }));
