@@ -36,8 +36,10 @@ namespace AmbilightControllerForm
         // Hardware Streaming variables
         private SerialPort serialPort;
         private UdpClient udpClient;
-        private IPEndPoint udpTarget;      // port 7778 - main live data
-        private IPEndPoint udpTarget7777;   // port 7777 - preset/static color selection
+        private IPEndPoint udpTarget;      // main live data
+        private IPEndPoint udpTarget7777;  // preset/static color selection
+        private int portFastExecution = 7778;
+        private int portEventBased = 7777;
         private bool useUdp = false;
         private int streamsSentThisSecond = 0;
 
@@ -242,6 +244,7 @@ namespace AmbilightControllerForm
 
         public Form1()
         {
+            try { this.Icon = new Icon("icon.ico"); } catch { }
             loadedUnified = LoadUnifiedSettings(false);
 
             SetupCustomStyles();
@@ -281,9 +284,9 @@ namespace AmbilightControllerForm
                 return;
             }
 
-            settingsForm = new Form
+            settingsForm = new SettingsForm
             {
-                Size = new Size(300, 420),
+                Size = new Size(400, 450),
                 FormBorderStyle = FormBorderStyle.None,
                 StartPosition = FormStartPosition.CenterParent,
                 BackColor = Color.FromArgb(19, 20, 23)
@@ -293,6 +296,7 @@ namespace AmbilightControllerForm
             DwmSetWindowAttribute(settingsForm.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
 
             _ = ApplyBackgroundAsync(false, true);
+            settingsForm.ResizeEnd += (s, e) => { _ = ApplyBackgroundAsync(false, true); };
 
             // Dragging mechanics
             Point dragStart = Point.Empty;
@@ -308,40 +312,65 @@ namespace AmbilightControllerForm
             Label lblTitle = new Label { Text = "Settings", ForeColor = Color.White, Font = new Font("Segoe UI", 12f, FontStyle.Bold), Location = new Point(12, 12), AutoSize = true, BackColor = Color.Transparent };
             settingsForm.Controls.Add(lblTitle);
 
-            GlassButton btnClose = new GlassButton { Text = "✕", Location = new Point(settingsForm.Width - 40, 10), Size = new Size(30, 30), BackColor = Color.FromArgb(50, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            GlassButton btnClose = new GlassButton { Text = "✕", Location = new Point(settingsForm.Width - 40, 10), Size = new Size(30, 30), BackColor = Color.FromArgb(50, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Anchor = AnchorStyles.Top | AnchorStyles.Right };
             btnClose.FlatAppearance.BorderSize = 0;
             btnClose.Click += (s, e) => settingsForm.Hide();
             settingsForm.Controls.Add(btnClose);
 
+            Panel scrollPanel = new Panel {
+                Location = new Point(0, 40),
+                Size = new Size(settingsForm.Width, settingsForm.Height - 40),
+                AutoScroll = true,
+                BackColor = Color.Transparent,
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+            };
+            scrollPanel.MouseDown += (s, e) => { dragStart = e.Location; };
+            scrollPanel.MouseMove += (s, e) => {
+                if (e.Button == MouseButtons.Left && dragStart != Point.Empty)
+                    settingsForm.Location = new Point(settingsForm.Left + e.X - dragStart.X, settingsForm.Top + e.Y - dragStart.Y);
+            };
+            scrollPanel.MouseUp += (s, e) => dragStart = Point.Empty;
+            settingsForm.Controls.Add(scrollPanel);
+
             // Reparent existing controls
             btnModeToggle.Location = new Point(12, 50);
-            settingsForm.Controls.Add(btnModeToggle);
+            scrollPanel.Controls.Add(btnModeToggle);
 
             lblPixelCount.Location = new Point(12, 85);
-            settingsForm.Controls.Add(lblPixelCount);
+            scrollPanel.Controls.Add(lblPixelCount);
 
             numPixelCount.Location = new Point(75, 87);
-            settingsForm.Controls.Add(numPixelCount);
+            scrollPanel.Controls.Add(numPixelCount);
 
             radInvertOrder.Location = new Point(12, 120);
-            settingsForm.Controls.Add(radInvertOrder);
+            scrollPanel.Controls.Add(radInvertOrder);
 
             btnAddressableSettings.Location = new Point(12, 150);
-            settingsForm.Controls.Add(btnAddressableSettings);
+            scrollPanel.Controls.Add(btnAddressableSettings);
 
             lblCalibTitle.Location = new Point(12, 190);
-            settingsForm.Controls.Add(lblCalibTitle);
+            scrollPanel.Controls.Add(lblCalibTitle);
 
             btnCal1.Location = new Point(25, 222);
             btnCal2.Location = new Point(65, 222);
             btnCal3.Location = new Point(105, 222);
             btnCalR.Location = new Point(145, 222);
-            settingsForm.Controls.AddRange(calBtns);
+            scrollPanel.Controls.AddRange(calBtns);
 
             GlassButton btnUpdateLog = new GlassButton { Text = "Update Log", Location = new Point(12, 267), Size = new Size(116, 25), BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
             btnUpdateLog.FlatAppearance.BorderSize = 0;
             btnUpdateLog.Click += (s, e) => OpenUpdateLogForm();
-            settingsForm.Controls.Add(btnUpdateLog);
+            scrollPanel.Controls.Add(btnUpdateLog);
+
+            Label lblPortFast = new Label { Text = "Fast execution port:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 410), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numPortFast = new NumericUpDown { Location = new Point(135, 408), Size = new Size(60, 20), Minimum = 1, Maximum = 65535, Value = portFastExecution, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numPortFast.ValueChanged += (s, e) => { portFastExecution = (int)numPortFast.Value; if (useUdp && udpTarget != null) udpTarget.Port = portFastExecution; SaveUnifiedSettings(); };
+            
+            Label lblPortEvent = new Label { Text = "Event based port:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 440), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numPortEvent = new NumericUpDown { Location = new Point(135, 438), Size = new Size(60, 20), Minimum = 1, Maximum = 65535, Value = portEventBased, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numPortEvent.ValueChanged += (s, e) => { portEventBased = (int)numPortEvent.Value; if (useUdp && udpTarget7777 != null) udpTarget7777.Port = portEventBased; SaveUnifiedSettings(); };
+
+            scrollPanel.Controls.AddRange(new Control[] { lblPortFast, numPortFast, lblPortEvent, numPortEvent });
 
             ComboBox cbBackups = new ComboBox { Location = new Point(135, 267), Size = new Size(100, 25), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
             GlassButton btnRevert = new GlassButton { Text = "Revert", Location = new Point(240, 267), Size = new Size(50, 25), BackColor = Color.FromArgb(180, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
@@ -386,23 +415,23 @@ if os.path.exists('run.bat'):
                 }
             };
             
-            settingsForm.Controls.Add(cbBackups);
-            settingsForm.Controls.Add(btnRevert);
+            scrollPanel.Controls.Add(cbBackups);
+            scrollPanel.Controls.Add(btnRevert);
 
             Label lblBgSettings = new Label { Text = "Background Settings", ForeColor = Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold), Location = new Point(12, 305), AutoSize = true, BackColor = Color.Transparent };
-            settingsForm.Controls.Add(lblBgSettings);
+            scrollPanel.Controls.Add(lblBgSettings);
 
             ComboBox cbBgImages = new ComboBox { Location = new Point(12, 330), Size = new Size(130, 25), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
             GlassButton btnAddBg = new GlassButton { Text = "Add Custom Image", Location = new Point(150, 330), Size = new Size(138, 25), BackColor = Color.FromArgb(50, 50, 60), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
             btnAddBg.FlatAppearance.BorderSize = 0;
-            settingsForm.Controls.Add(cbBgImages);
-            settingsForm.Controls.Add(btnAddBg);
+            scrollPanel.Controls.Add(cbBgImages);
+            scrollPanel.Controls.Add(btnAddBg);
 
             Label lblBgBlur = new Label { Text = "Background Blur", ForeColor = Color.White, Font = new Font("Segoe UI", 9f), Location = new Point(12, 365), AutoSize = true, BackColor = Color.Transparent };
-            settingsForm.Controls.Add(lblBgBlur);
+            scrollPanel.Controls.Add(lblBgBlur);
             
             TrackBar tbBlur = new TrackBar { Minimum = 1, Maximum = 32, Value = Math.Max(1, Math.Min(32, backgroundBlur)), Location = new Point(120, 360), Size = new Size(168, 45), TickStyle = TickStyle.None };
-            settingsForm.Controls.Add(tbBlur);
+            scrollPanel.Controls.Add(tbBlur);
 
             bool isUpdatingDropdown = false;
             Action populateDropdown = () => {
@@ -3277,8 +3306,8 @@ if os.path.exists('run.bat'):
                     if (useUdp)
                     {
                         udpClient    = new UdpClient();
-                        udpTarget    = new IPEndPoint(IPAddress.Parse(ipAddress), 7778);
-                        udpTarget7777 = new IPEndPoint(IPAddress.Parse(ipAddress), 7777);
+                        udpTarget    = new IPEndPoint(IPAddress.Parse(ipAddress), portFastExecution);
+                        udpTarget7777 = new IPEndPoint(IPAddress.Parse(ipAddress), portEventBased);
                         success = true;
                     }
                     else
@@ -3879,5 +3908,49 @@ if os.path.exists('run.bat'):
         public override Color MenuItemPressedGradientBegin => Color.FromArgb(40, 40, 40);
         public override Color MenuItemPressedGradientMiddle => Color.FromArgb(40, 40, 40);
         public override Color MenuItemPressedGradientEnd => Color.FromArgb(40, 40, 40);
+    }
+
+    public class SettingsForm : Form
+    {
+        private const int WM_NCHITTEST = 0x84;
+        private const int HTLEFT = 0xA;
+        private const int HTRIGHT = 0xB;
+        private const int HTTOP = 0xC;
+        private const int HTTOPLEFT = 0xD;
+        private const int HTTOPRIGHT = 0xE;
+        private const int HTBOTTOM = 0xF;
+        private const int HTBOTTOMLEFT = 0x10;
+        private const int HTBOTTOMRIGHT = 0x11;
+        private const int BORDER_WIDTH = 8;
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg == WM_NCHITTEST)
+            {
+                Point pos = new Point(m.LParam.ToInt32());
+                pos = this.PointToClient(pos);
+                if (pos.X <= BORDER_WIDTH)
+                {
+                    if (pos.Y <= BORDER_WIDTH) m.Result = (IntPtr)HTTOPLEFT;
+                    else if (pos.Y >= this.ClientSize.Height - BORDER_WIDTH) m.Result = (IntPtr)HTBOTTOMLEFT;
+                    else m.Result = (IntPtr)HTLEFT;
+                }
+                else if (pos.X >= this.ClientSize.Width - BORDER_WIDTH)
+                {
+                    if (pos.Y <= BORDER_WIDTH) m.Result = (IntPtr)HTTOPRIGHT;
+                    else if (pos.Y >= this.ClientSize.Height - BORDER_WIDTH) m.Result = (IntPtr)HTBOTTOMRIGHT;
+                    else m.Result = (IntPtr)HTRIGHT;
+                }
+                else if (pos.Y <= BORDER_WIDTH)
+                {
+                    m.Result = (IntPtr)HTTOP;
+                }
+                else if (pos.Y >= this.ClientSize.Height - BORDER_WIDTH)
+                {
+                    m.Result = (IntPtr)HTBOTTOM;
+                }
+            }
+        }
     }
 }

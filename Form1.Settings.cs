@@ -39,6 +39,8 @@ namespace AmbilightControllerForm
             writeSingle("SmoothFrames", currentSmoothFrames.ToString());
             writeSingle("BackgroundImageName", backgroundImageName);
             writeSingle("BackgroundBlur", backgroundBlur.ToString());
+            writeSingle("PortFastExecution", portFastExecution.ToString());
+            writeSingle("PortEventBased", portEventBased.ToString());
 
             int activeCalibIndex = 3;
             if (calBtns != null && calBtns.Length == 4) {
@@ -152,6 +154,8 @@ namespace AmbilightControllerForm
                     if (singleValues.TryGetValue("SmoothFrames", out string sfStr)) int.TryParse(sfStr, out currentSmoothFrames);
                     if (singleValues.TryGetValue("BackgroundImageName", out string bgName)) backgroundImageName = bgName;
                     if (singleValues.TryGetValue("BackgroundBlur", out string bgBlur)) int.TryParse(bgBlur, out backgroundBlur);
+                    if (singleValues.TryGetValue("PortFastExecution", out string pfeStr)) int.TryParse(pfeStr, out portFastExecution);
+                    if (singleValues.TryGetValue("PortEventBased", out string pebStr)) int.TryParse(pebStr, out portEventBased);
 
                     if (multiValues.TryGetValue("AmbilightCurve", out List<string> ac) && ac.Count == 4) {
                         var ic = System.Globalization.CultureInfo.InvariantCulture;
