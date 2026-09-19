@@ -8,6 +8,34 @@ using MapFlags = SharpDX.Direct3D11.MapFlags;
 
 namespace AmbilightControllerForm
 {
+    public struct FloatColor
+    {
+        public float R;
+        public float G;
+        public float B;
+
+        public FloatColor(float r, float g, float b)
+        {
+            R = r;
+            G = g;
+            B = b;
+        }
+
+        public static FloatColor FromColor(Color c)
+        {
+            return new FloatColor(c.R, c.G, c.B);
+        }
+
+        public Color ToColor()
+        {
+            return Color.FromArgb(
+                Math.Min(255, Math.Max(0, (int)Math.Round(R))),
+                Math.Min(255, Math.Max(0, (int)Math.Round(G))),
+                Math.Min(255, Math.Max(0, (int)Math.Round(B)))
+            );
+        }
+    }
+
     public class DxgiScreenCapture : IDisposable
     {
         private Device _device;
@@ -99,8 +127,19 @@ namespace AmbilightControllerForm
             _screenTexture = new Texture2D(_device, textureDesc);
         }
 
-        public System.Drawing.Color? TryAcquireNextFrame()
+        public System.Drawing.Color? TryAcquireNextFrame(int gridWidth = 8, int gridHeight = 8, int marginX = -1, int marginY = -1)
         {
+            FloatColor? fc = TryAcquireNextFrameFloat(gridWidth, gridHeight, marginX, marginY);
+            return fc?.ToColor();
+        }
+
+        public FloatColor? TryAcquireNextFrameFloat(int gridWidth = 8, int gridHeight = 8, int marginX = -1, int marginY = -1)
+        {
+            if (gridWidth < 1) gridWidth = 1;
+            if (gridHeight < 1) gridHeight = 1;
+            if (marginX < 0) marginX = _width / 15;
+            if (marginY < 0) marginY = _height / 15;
+
             SharpDX.DXGI.Resource screenResource = null;
             OutputDuplicateFrameInformation duplicateFrameInformation;
 
@@ -137,32 +176,28 @@ namespace AmbilightControllerForm
 
             if (mapSource.DataPointer != IntPtr.Zero)
             {
-                // We sample an 8x8 grid out of the center portion of the screen (excluding 1/15th margins)
-                int marginX = _width / 15;
-                int marginY = _height / 15;
-                int captureWidth = _width - 2 * marginX;
-                int captureHeight = _height - 2 * marginY;
+                int captureWidth = Math.Max(1, _width - 2 * marginX);
+                int captureHeight = Math.Max(1, _height - 2 * marginY);
 
                 long rSum = 0, gSum = 0, bSum = 0;
-                int stepX = captureWidth / 8;
-                int stepY = captureHeight / 8;
+                float stepX = gridWidth > 1 ? (float)captureWidth / (gridWidth - 1) : 0f;
+                float stepY = gridHeight > 1 ? (float)captureHeight / (gridHeight - 1) : 0f;
 
                 unsafe
                 {
                     byte* sourcePtr = (byte*)mapSource.DataPointer;
                     int pitch = mapSource.RowPitch;
 
-                    for (int y = 0; y < 8; y++)
+                    for (int y = 0; y < gridHeight; y++)
                     {
-                        int pixelY = marginY + (y * stepY);
-                        // Make sure we don't go out of bounds
+                        int pixelY = gridHeight > 1 ? marginY + (int)Math.Round(y * stepY) : marginY + captureHeight / 2;
                         if (pixelY >= _height) pixelY = _height - 1;
 
                         byte* rowPtr = sourcePtr + (pixelY * pitch);
 
-                        for (int x = 0; x < 8; x++)
+                        for (int x = 0; x < gridWidth; x++)
                         {
-                            int pixelX = marginX + (x * stepX);
+                            int pixelX = gridWidth > 1 ? marginX + (int)Math.Round(x * stepX) : marginX + captureWidth / 2;
                             if (pixelX >= _width) pixelX = _width - 1;
 
                             int pixelOffset = pixelX * 4;
@@ -181,15 +216,19 @@ namespace AmbilightControllerForm
 
                 _device.ImmediateContext.UnmapSubresource(_screenTexture, 0);
 
-                return System.Drawing.Color.FromArgb((int)(rSum / 64), (int)(gSum / 64), (int)(bSum / 64));
+                int totalSamples = gridWidth * gridHeight;
+                return new FloatColor((float)rSum / totalSamples, (float)gSum / totalSamples, (float)bSum / totalSamples);
             }
 
             return null;
         }
 
-        public System.Drawing.Color[] TryAcquireAddressableFrame(System.Drawing.Rectangle[] regions)
+        public System.Drawing.Color[] TryAcquireAddressableFrame(System.Drawing.Rectangle[] regions, int gridWidth = 8, int gridHeight = 8, int innerMargin = 0)
         {
             if (regions == null || regions.Length == 0) return null;
+            if (gridWidth < 1) gridWidth = 1;
+            if (gridHeight < 1) gridHeight = 1;
+            if (innerMargin < 0) innerMargin = 0;
 
             SharpDX.DXGI.Resource screenResource = null;
             OutputDuplicateFrameInformation duplicateFrameInformation;
@@ -233,14 +272,24 @@ namespace AmbilightControllerForm
                     {
                         System.Drawing.Rectangle rect = regions[i];
                         
-                        // Bound the rectangle to screen bounds
-                        int startX = Math.Max(0, rect.X);
-                        int startY = Math.Max(0, rect.Y);
-                        int endX = Math.Min(_width - 1, rect.Right);
-                        int endY = Math.Min(_height - 1, rect.Bottom);
+                        // Bound the rectangle to screen bounds with inner margin inset
+                        int startX = Math.Max(0, rect.X + innerMargin);
+                        int startY = Math.Max(0, rect.Y + innerMargin);
+                        int endX = Math.Min(_width - 1, rect.Right - innerMargin);
+                        int endY = Math.Min(_height - 1, rect.Bottom - innerMargin);
 
                         int captureWidth = endX - startX;
                         int captureHeight = endY - startY;
+
+                        if (captureWidth < 0 || captureHeight < 0)
+                        {
+                            startX = Math.Max(0, rect.X);
+                            startY = Math.Max(0, rect.Y);
+                            endX = Math.Min(_width - 1, rect.Right);
+                            endY = Math.Min(_height - 1, rect.Bottom);
+                            captureWidth = endX - startX;
+                            captureHeight = endY - startY;
+                        }
 
                         if (captureWidth <= 0 || captureHeight <= 0)
                         {
@@ -248,23 +297,24 @@ namespace AmbilightControllerForm
                             continue;
                         }
 
-                        // We sample an 8x8 grid within this region for performance
                         long rSum = 0, gSum = 0, bSum = 0;
-                        int stepX = Math.Max(1, captureWidth / 8);
-                        int stepY = Math.Max(1, captureHeight / 8);
+                        float stepX = gridWidth > 1 ? (float)captureWidth / (gridWidth - 1) : 0f;
+                        float stepY = gridHeight > 1 ? (float)captureHeight / (gridHeight - 1) : 0f;
                         int sampleCount = 0;
 
-                        for (int y = 0; y < 8; y++)
+                        for (int y = 0; y < gridHeight; y++)
                         {
-                            int pixelY = startY + (y * stepY);
+                            int pixelY = gridHeight > 1 ? startY + (int)Math.Round(y * stepY) : startY + captureHeight / 2;
                             if (pixelY > endY) break;
+                            if (pixelY >= _height) pixelY = _height - 1;
 
                             byte* rowPtr = sourcePtr + (pixelY * pitch);
 
-                            for (int x = 0; x < 8; x++)
+                            for (int x = 0; x < gridWidth; x++)
                             {
-                                int pixelX = startX + (x * stepX);
+                                int pixelX = gridWidth > 1 ? startX + (int)Math.Round(x * stepX) : startX + captureWidth / 2;
                                 if (pixelX > endX) break;
+                                if (pixelX >= _width) pixelX = _width - 1;
 
                                 int pixelOffset = pixelX * 4;
 

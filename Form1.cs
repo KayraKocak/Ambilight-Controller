@@ -42,6 +42,24 @@ namespace AmbilightControllerForm
         private int portEventBased = 7777;
         private bool useUdp = false;
         private int streamsSentThisSecond = 0;
+        private int maxCaptureFps = 60;
+        private int maxTransmitFps = 60;
+        private bool applySmoothingAfterCalibration = false;
+        private bool highPwmResolution = false;
+        private int genericGridWidth = 8;
+        private int genericGridHeight = 8;
+        private int genericMarginX = -1;
+        private int genericMarginY = -1;
+
+        private int addressableGridWidth = 8;
+        private int addressableGridHeight = 8;
+        private int addressableMarginX = -1;
+        private int addressableMarginY = -1;
+        private int addressableInnerMargin = 2;
+        private Color lastCapturedGenericColor = Color.Black;
+        private FloatColor lastCapturedGenericFloatColor = new FloatColor(0, 0, 0);
+        private int lastSent2048R = -1, lastSent2048G = -1, lastSent2048B = -1;
+        private readonly object frameLock = new object();
 
         // Custom Titlebar dragging variables
         private bool isDraggingWindow = false;
@@ -68,6 +86,7 @@ namespace AmbilightControllerForm
         private Label lblHex;
         private Label lblDataPacket;
         private Color lastSentColor = Color.Black;
+        private byte[] lastSentAddressableData = null;
         private Panel panelColorPreview;
 
         private GlassSlider trkBrightness;
@@ -371,6 +390,98 @@ namespace AmbilightControllerForm
             numPortEvent.ValueChanged += (s, e) => { portEventBased = (int)numPortEvent.Value; if (useUdp && udpTarget7777 != null) udpTarget7777.Port = portEventBased; SaveUnifiedSettings(); };
 
             scrollPanel.Controls.AddRange(new Control[] { lblPortFast, numPortFast, lblPortEvent, numPortEvent });
+
+            Label lblMaxCaptureFps = new Label { Text = "Max Capture FPS:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 470), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numMaxCaptureFps = new NumericUpDown { Location = new Point(135, 468), Size = new Size(60, 20), Minimum = 1, Maximum = 1000, Value = maxCaptureFps, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numMaxCaptureFps.ValueChanged += (s, e) => { maxCaptureFps = (int)numMaxCaptureFps.Value; SaveUnifiedSettings(); };
+
+            Label lblMaxTransmitFps = new Label { Text = "Max Transmit FPS:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 500), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numMaxTransmitFps = new NumericUpDown { Location = new Point(135, 498), Size = new Size(60, 20), Minimum = 1, Maximum = 1000, Value = maxTransmitFps, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numMaxTransmitFps.ValueChanged += (s, e) => { maxTransmitFps = (int)numMaxTransmitFps.Value; SaveUnifiedSettings(); };
+
+            scrollPanel.Controls.AddRange(new Control[] { lblMaxCaptureFps, numMaxCaptureFps, lblMaxTransmitFps, numMaxTransmitFps });
+
+            CheckBox chkSmoothAfter = new CheckBox {
+                Text = "Apply smoothing after calibration",
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.5f),
+                Location = new Point(12, 535),
+                AutoSize = true,
+                Checked = applySmoothingAfterCalibration,
+                BackColor = Color.Transparent
+            };
+            chkSmoothAfter.CheckedChanged += (s, e) => {
+                applySmoothingAfterCalibration = chkSmoothAfter.Checked;
+                SaveUnifiedSettings();
+            };
+            scrollPanel.Controls.Add(chkSmoothAfter);
+
+            CheckBox chkHighPwm = new CheckBox {
+                Text = "High pwm resolution",
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.5f),
+                Location = new Point(12, 560),
+                AutoSize = true,
+                Checked = highPwmResolution,
+                BackColor = Color.Transparent
+            };
+            chkHighPwm.CheckedChanged += (s, e) => {
+                highPwmResolution = chkHighPwm.Checked;
+                SaveUnifiedSettings();
+            };
+            scrollPanel.Controls.Add(chkHighPwm);
+
+            Screen primaryScreen = Screen.PrimaryScreen;
+            int defMarginX = primaryScreen != null ? primaryScreen.Bounds.Width / 15 : 0;
+            int defMarginY = primaryScreen != null ? primaryScreen.Bounds.Height / 15 : 0;
+
+            // Generic Mode Capture Settings Controls
+            Label lblSecGen = new Label { Text = "--- Generic Mode Capture ---", ForeColor = Color.Cyan, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Location = new Point(12, 590), AutoSize = true, BackColor = Color.Transparent };
+
+            Label lblGenGridW = new Label { Text = "Generic Grid W:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 615), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numGenGridW = new NumericUpDown { Location = new Point(145, 613), Size = new Size(80, 20), Minimum = 1, Maximum = decimal.MaxValue, Value = genericGridWidth, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numGenGridW.ValueChanged += (s, e) => { genericGridWidth = (int)numGenGridW.Value; SaveUnifiedSettings(); };
+
+            Label lblGenGridH = new Label { Text = "Generic Grid H:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 640), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numGenGridH = new NumericUpDown { Location = new Point(145, 638), Size = new Size(80, 20), Minimum = 1, Maximum = decimal.MaxValue, Value = genericGridHeight, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numGenGridH.ValueChanged += (s, e) => { genericGridHeight = (int)numGenGridH.Value; SaveUnifiedSettings(); };
+
+            Label lblGenMarginX = new Label { Text = "Generic Margin X:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 665), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numGenMarginX = new NumericUpDown { Location = new Point(145, 663), Size = new Size(80, 20), Minimum = 0, Maximum = decimal.MaxValue, Value = genericMarginX < 0 ? defMarginX : genericMarginX, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numGenMarginX.ValueChanged += (s, e) => { genericMarginX = (int)numGenMarginX.Value; SaveUnifiedSettings(); };
+
+            Label lblGenMarginY = new Label { Text = "Generic Margin Y:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 690), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numGenMarginY = new NumericUpDown { Location = new Point(145, 688), Size = new Size(80, 20), Minimum = 0, Maximum = decimal.MaxValue, Value = genericMarginY < 0 ? defMarginY : genericMarginY, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numGenMarginY.ValueChanged += (s, e) => { genericMarginY = (int)numGenMarginY.Value; SaveUnifiedSettings(); };
+
+            // Addressable Mode Capture Settings Controls
+            Label lblSecAddr = new Label { Text = "--- Addressable Mode Capture ---", ForeColor = Color.Cyan, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Location = new Point(12, 720), AutoSize = true, BackColor = Color.Transparent };
+
+            Label lblAddrGridW = new Label { Text = "Addr Grid W:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 745), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numAddrGridW = new NumericUpDown { Location = new Point(145, 743), Size = new Size(80, 20), Minimum = 1, Maximum = decimal.MaxValue, Value = addressableGridWidth, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numAddrGridW.ValueChanged += (s, e) => { addressableGridWidth = (int)numAddrGridW.Value; SaveUnifiedSettings(); };
+
+            Label lblAddrGridH = new Label { Text = "Addr Grid H:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 770), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numAddrGridH = new NumericUpDown { Location = new Point(145, 768), Size = new Size(80, 20), Minimum = 1, Maximum = decimal.MaxValue, Value = addressableGridHeight, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numAddrGridH.ValueChanged += (s, e) => { addressableGridHeight = (int)numAddrGridH.Value; SaveUnifiedSettings(); };
+
+            Label lblAddrMarginX = new Label { Text = "Addr Margin X:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 795), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numAddrMarginX = new NumericUpDown { Location = new Point(145, 793), Size = new Size(80, 20), Minimum = 0, Maximum = decimal.MaxValue, Value = addressableMarginX < 0 ? defMarginX : addressableMarginX, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numAddrMarginX.ValueChanged += (s, e) => { addressableMarginX = (int)numAddrMarginX.Value; SaveUnifiedSettings(); };
+
+            Label lblAddrMarginY = new Label { Text = "Addr Margin Y:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 820), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numAddrMarginY = new NumericUpDown { Location = new Point(145, 818), Size = new Size(80, 20), Minimum = 0, Maximum = decimal.MaxValue, Value = addressableMarginY < 0 ? defMarginY : addressableMarginY, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numAddrMarginY.ValueChanged += (s, e) => { addressableMarginY = (int)numAddrMarginY.Value; SaveUnifiedSettings(); };
+
+            Label lblAddrInnerMargin = new Label { Text = "Addr Inner Margin:", ForeColor = Color.White, Font = new Font("Segoe UI", 8f), Location = new Point(12, 845), AutoSize = true, BackColor = Color.Transparent };
+            NumericUpDown numAddrInnerMargin = new NumericUpDown { Location = new Point(145, 843), Size = new Size(80, 20), Minimum = 0, Maximum = decimal.MaxValue, Value = addressableInnerMargin, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White };
+            numAddrInnerMargin.ValueChanged += (s, e) => { addressableInnerMargin = (int)numAddrInnerMargin.Value; SaveUnifiedSettings(); };
+
+            scrollPanel.Controls.AddRange(new Control[] {
+                lblSecGen, lblGenGridW, numGenGridW, lblGenGridH, numGenGridH, lblGenMarginX, numGenMarginX, lblGenMarginY, numGenMarginY,
+                lblSecAddr, lblAddrGridW, numAddrGridW, lblAddrGridH, numAddrGridH, lblAddrMarginX, numAddrMarginX, lblAddrMarginY, numAddrMarginY,
+                lblAddrInnerMargin, numAddrInnerMargin
+            });
 
             ComboBox cbBackups = new ComboBox { Location = new Point(135, 267), Size = new Size(100, 25), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(45, 46, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
             GlassButton btnRevert = new GlassButton { Text = "Revert", Location = new Point(240, 267), Size = new Size(50, 25), BackColor = Color.FromArgb(180, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f) };
@@ -1166,6 +1277,7 @@ if os.path.exists('run.bat'):
                 Visible = false
             };
             btnAddressableSettings.FlatAppearance.BorderSize = 0;
+            btnAddressableSettings.Click += BtnAddressableSettings_Click;
             GlassButton btnSettings = new GlassButton
             {
                 Text = "⚙ Settings",
@@ -1189,7 +1301,7 @@ if os.path.exists('run.bat'):
             numPixelCount.Value = Math.Max(numPixelCount.Minimum, Math.Min(numPixelCount.Maximum, addressablePixelCount));
             radInvertOrder.Visible = isAddressableMode;
             radInvertOrder.Checked = invertPixelOrder;
-            btnAddressableSettings.Visible = isAddressableMode;
+            btnAddressableSettings.Visible = true;
 
             // ==========================================
             // 3. CENTER PANEL: VISUALIZER & CONNECT
@@ -2139,7 +2251,7 @@ if os.path.exists('run.bat'):
             lblPixelCount.Visible = isAddressableMode;
             numPixelCount.Visible = isAddressableMode;
             radInvertOrder.Visible = isAddressableMode;
-            btnAddressableSettings.Visible = isAddressableMode;
+            btnAddressableSettings.Visible = true;
             
             SaveAddressableSettings();
             
@@ -2166,16 +2278,79 @@ if os.path.exists('run.bat'):
 
         private void BtnAddressableSettings_Click(object sender, EventArgs e)
         {
-            using (CaptureAreaOverlayForm overlay = new CaptureAreaOverlayForm(addressablePixelCount, addressableCaptureAreas))
+            int activeGridW = isAddressableMode ? addressableGridWidth : genericGridWidth;
+            int activeGridH = isAddressableMode ? addressableGridHeight : genericGridHeight;
+            int activeMarginX = isAddressableMode ? addressableMarginX : genericMarginX;
+            int activeMarginY = isAddressableMode ? addressableMarginY : genericMarginY;
+
+            using (CaptureAreaOverlayForm overlay = new CaptureAreaOverlayForm(isAddressableMode, addressablePixelCount, activeGridW, activeGridH, activeMarginX, activeMarginY, addressableInnerMargin, addressableCaptureAreas))
             {
                 overlay.OnAreasChanged += (areas) => {
-                    addressableCaptureAreas = areas;
+                    if (isAddressableMode)
+                    {
+                        addressableCaptureAreas = areas;
+                    }
                 };
-                
+
+                overlay.OnGridSizeChanged += (gw, gh) => {
+                    if (isAddressableMode)
+                    {
+                        addressableGridWidth = gw;
+                        addressableGridHeight = gh;
+                    }
+                    else
+                    {
+                        genericGridWidth = gw;
+                        genericGridHeight = gh;
+                    }
+                    SaveUnifiedSettings();
+                };
+
+                overlay.OnMarginSizeChanged += (mx, my) => {
+                    if (isAddressableMode)
+                    {
+                        addressableMarginX = mx;
+                        addressableMarginY = my;
+                    }
+                    else
+                    {
+                        genericMarginX = mx;
+                        genericMarginY = my;
+                    }
+                    SaveUnifiedSettings();
+                };
+
+                overlay.OnInnerMarginChanged += (im) => {
+                    if (isAddressableMode)
+                    {
+                        addressableInnerMargin = im;
+                    }
+                    SaveUnifiedSettings();
+                };
+
                 if (overlay.ShowDialog() == DialogResult.OK)
                 {
-                    addressableCaptureAreas = overlay.Areas;
-                    SaveAddressableSettings();
+                    if (isAddressableMode)
+                    {
+                        if (overlay.Areas != null)
+                        {
+                            addressableCaptureAreas = overlay.Areas;
+                            SaveAddressableSettings();
+                        }
+                        addressableGridWidth = overlay.GridWidth;
+                        addressableGridHeight = overlay.GridHeight;
+                        addressableMarginX = overlay.MarginX;
+                        addressableMarginY = overlay.MarginY;
+                        addressableInnerMargin = overlay.InnerMargin;
+                    }
+                    else
+                    {
+                        genericGridWidth = overlay.GridWidth;
+                        genericGridHeight = overlay.GridHeight;
+                        genericMarginX = overlay.MarginX;
+                        genericMarginY = overlay.MarginY;
+                    }
+                    SaveUnifiedSettings();
                 }
             }
         }
@@ -2338,84 +2513,112 @@ if os.path.exists('run.bat'):
             TimeBeginPeriod(1);
             try
             {
-                int lastUiUpdate = Environment.TickCount;
-                System.Collections.Generic.Queue<Color> smoothQueue = new System.Collections.Generic.Queue<Color>();
-                long runningSr = 0, runningSg = 0, runningSb = 0;
-
-                System.Collections.Generic.Queue<Color>[] addrSmoothQueues = null;
-                long[] addrRunningSr = null, addrRunningSg = null, addrRunningSb = null;
-
-                while (isAmbilightActive && isSystemOn)
+                Task captureTask = Task.Run(async () =>
                 {
-                    DxgiScreenCapture dxgiCapture = null;
-                    try
+                    int lastUiUpdate = Environment.TickCount;
+                    System.Collections.Generic.Queue<FloatColor> smoothQueue = new System.Collections.Generic.Queue<FloatColor>();
+                    double runningSr = 0, runningSg = 0, runningSb = 0;
+
+                    System.Collections.Generic.Queue<Color>[] addrSmoothQueues = null;
+                    long[] addrRunningSr = null, addrRunningSg = null, addrRunningSb = null;
+
+                    Color[] lastRawColors = null;
+                    int framesSinceLastNewFrameAddr = 0;
+
+                    FloatColor? lastRawColorGeneric = null;
+                    int framesSinceLastNewFrameGen = 0;
+
+                    while (isAmbilightActive && isSystemOn)
                     {
-                        dxgiCapture = new DxgiScreenCapture();
-
-                        while (isAmbilightActive && isSystemOn)
+                        DxgiScreenCapture dxgiCapture = null;
+                        try
                         {
-                            if (isAddressableMode)
+                            dxgiCapture = new DxgiScreenCapture();
+
+                            while (isAmbilightActive && isSystemOn)
                             {
-                                if (addrSmoothQueues == null || addrSmoothQueues.Length != addressablePixelCount)
-                                {
-                                    addrSmoothQueues = new System.Collections.Generic.Queue<Color>[addressablePixelCount];
-                                    addrRunningSr = new long[addressablePixelCount];
-                                    addrRunningSg = new long[addressablePixelCount];
-                                    addrRunningSb = new long[addressablePixelCount];
-                                    for (int i = 0; i < addressablePixelCount; i++) addrSmoothQueues[i] = new System.Collections.Generic.Queue<Color>();
-                                }
+                                int loopStart = Environment.TickCount;
+                                int currentCaptureInterval = 1000 / Math.Max(1, maxCaptureFps);
 
-                                if (addressableCaptureAreas != null && addressableCaptureAreas.Length == addressablePixelCount)
+                                if (isAddressableMode)
                                 {
-                                    Color[] rawColors = dxgiCapture.TryAcquireAddressableFrame(addressableCaptureAreas);
-                                    if (rawColors != null)
+                                    if (addrSmoothQueues == null || addrSmoothQueues.Length != addressablePixelCount)
                                     {
-                                        for (int i = 0; i < rawColors.Length && i < segmentColors.Length; i++)
+                                        addrSmoothQueues = new System.Collections.Generic.Queue<Color>[addressablePixelCount];
+                                        addrRunningSr = new long[addressablePixelCount];
+                                        addrRunningSg = new long[addressablePixelCount];
+                                        addrRunningSb = new long[addressablePixelCount];
+                                        for (int i = 0; i < addressablePixelCount; i++) addrSmoothQueues[i] = new System.Collections.Generic.Queue<Color>();
+                                    }
+
+                                    if (addressableCaptureAreas != null && addressableCaptureAreas.Length == addressablePixelCount)
+                                    {
+                                        Color[] rawColors = dxgiCapture.TryAcquireAddressableFrame(addressableCaptureAreas, addressableGridWidth, addressableGridHeight, addressableInnerMargin);
+                                        
+                                        bool isDummyFrame = false;
+                                        if (rawColors != null)
                                         {
-                                            Color avgColor = rawColors[i];
-
-                                            Color currentAverage = addrSmoothQueues[i].Count > 0
-                                                ? Color.FromArgb((int)(addrRunningSr[i] / addrSmoothQueues[i].Count), (int)(addrRunningSg[i] / addrSmoothQueues[i].Count), (int)(addrRunningSb[i] / addrSmoothQueues[i].Count))
-                                                : avgColor;
-
-                                            int colorChange = Math.Abs(avgColor.R - currentAverage.R) + 
-                                                              Math.Abs(avgColor.G - currentAverage.G) + 
-                                                              Math.Abs(avgColor.B - currentAverage.B);
-
-                                            if (colorChange > currentSmoothThreshold)
-                                            {
-                                                addrSmoothQueues[i].Clear();
-                                                addrRunningSr[i] = 0; addrRunningSg[i] = 0; addrRunningSb[i] = 0;
-
-                                                addrSmoothQueues[i].Enqueue(avgColor);
-                                                addrRunningSr[i] += avgColor.R;
-                                                addrRunningSg[i] += avgColor.G;
-                                                addrRunningSb[i] += avgColor.B;
-                                            }
-                                            else
-                                            {
-                                                addrSmoothQueues[i].Enqueue(avgColor);
-                                                addrRunningSr[i] += avgColor.R;
-                                                addrRunningSg[i] += avgColor.G;
-                                                addrRunningSb[i] += avgColor.B;
-
-                                                while (addrSmoothQueues[i].Count > currentSmoothFrames && addrSmoothQueues[i].Count > 0)
-                                                {
-                                                    Color dequeued = addrSmoothQueues[i].Dequeue();
-                                                    addrRunningSr[i] -= dequeued.R;
-                                                    addrRunningSg[i] -= dequeued.G;
-                                                    addrRunningSb[i] -= dequeued.B;
-                                                }
-                                            }
-
-                                            segmentColors[i] = addrSmoothQueues[i].Count > 0 
-                                                ? Color.FromArgb((int)(addrRunningSr[i] / addrSmoothQueues[i].Count), (int)(addrRunningSg[i] / addrSmoothQueues[i].Count), (int)(addrRunningSb[i] / addrSmoothQueues[i].Count))
-                                                : avgColor;
+                                            lastRawColors = rawColors;
+                                            framesSinceLastNewFrameAddr = 0;
+                                        }
+                                        else if (lastRawColors != null && framesSinceLastNewFrameAddr < currentSmoothFrames)
+                                        {
+                                            rawColors = lastRawColors;
+                                            framesSinceLastNewFrameAddr++;
+                                            isDummyFrame = true;
                                         }
 
-                                        if (isAmbilightActive && isSystemOn)
+                                        if (rawColors != null)
                                         {
-                                            SendAddressableDataToHardware();
+                                            lock (frameLock)
+                                            {
+                                                for (int i = 0; i < rawColors.Length && i < segmentColors.Length; i++)
+                                                {
+                                                    Color avgColor = rawColors[i];
+                                                    if (applySmoothingAfterCalibration)
+                                                    {
+                                                        avgColor = ProcessColor(avgColor);
+                                                    }
+
+                                                    Color currentAverage = addrSmoothQueues[i].Count > 0
+                                                        ? Color.FromArgb((int)(addrRunningSr[i] / addrSmoothQueues[i].Count), (int)(addrRunningSg[i] / addrSmoothQueues[i].Count), (int)(addrRunningSb[i] / addrSmoothQueues[i].Count))
+                                                        : avgColor;
+
+                                                    int colorChange = Math.Abs(avgColor.R - currentAverage.R) + 
+                                                                      Math.Abs(avgColor.G - currentAverage.G) + 
+                                                                      Math.Abs(avgColor.B - currentAverage.B);
+
+                                                    if (colorChange > currentSmoothThreshold && !isDummyFrame)
+                                                    {
+                                                        addrSmoothQueues[i].Clear();
+                                                        addrRunningSr[i] = 0; addrRunningSg[i] = 0; addrRunningSb[i] = 0;
+
+                                                        addrSmoothQueues[i].Enqueue(avgColor);
+                                                        addrRunningSr[i] += avgColor.R;
+                                                        addrRunningSg[i] += avgColor.G;
+                                                        addrRunningSb[i] += avgColor.B;
+                                                    }
+                                                    else
+                                                    {
+                                                        addrSmoothQueues[i].Enqueue(avgColor);
+                                                        addrRunningSr[i] += avgColor.R;
+                                                        addrRunningSg[i] += avgColor.G;
+                                                        addrRunningSb[i] += avgColor.B;
+
+                                                        while (addrSmoothQueues[i].Count > currentSmoothFrames && addrSmoothQueues[i].Count > 0)
+                                                        {
+                                                            Color dequeued = addrSmoothQueues[i].Dequeue();
+                                                            addrRunningSr[i] -= dequeued.R;
+                                                            addrRunningSg[i] -= dequeued.G;
+                                                            addrRunningSb[i] -= dequeued.B;
+                                                        }
+                                                    }
+
+                                                    segmentColors[i] = addrSmoothQueues[i].Count > 0 
+                                                        ? Color.FromArgb((int)(addrRunningSr[i] / addrSmoothQueues[i].Count), (int)(addrRunningSg[i] / addrSmoothQueues[i].Count), (int)(addrRunningSb[i] / addrSmoothQueues[i].Count))
+                                                        : avgColor;
+                                                }
+                                            }
 
                                             if (Environment.TickCount - lastUiUpdate > 30)
                                             {
@@ -2431,97 +2634,154 @@ if os.path.exists('run.bat'):
                                         }
                                     }
                                 }
-                                await Task.Delay(1);
-                                continue;
-                            }
-
-                            Color? rawColor = dxgiCapture.TryAcquireNextFrame();
-                            if (rawColor.HasValue)
-                            {
-                                Color avgColor = rawColor.Value;
-                                // 4. Cosmetic Smoothing Logic (O(1) Optimized)
-                                Color currentAverage = smoothQueue.Count > 0
-                                    ? Color.FromArgb((int)(runningSr / smoothQueue.Count), (int)(runningSg / smoothQueue.Count), (int)(runningSb / smoothQueue.Count))
-                                    : avgColor;
-
-                                int colorChange = Math.Abs(avgColor.R - currentAverage.R) + 
-                                                  Math.Abs(avgColor.G - currentAverage.G) + 
-                                                  Math.Abs(avgColor.B - currentAverage.B);
-
-                                if (colorChange > currentSmoothThreshold)
+                                else
                                 {
-                                    // Sudden large change: discard old smoothing data
-                                    smoothQueue.Clear();
-                                    runningSr = 0; runningSg = 0; runningSb = 0;
+                                    FloatColor? rawColor = dxgiCapture.TryAcquireNextFrameFloat(genericGridWidth, genericGridHeight, genericMarginX, genericMarginY);
+                                    
+                                    bool isDummyFrame = false;
+                                    if (rawColor.HasValue)
+                                    {
+                                        lastRawColorGeneric = rawColor.Value;
+                                        framesSinceLastNewFrameGen = 0;
+                                    }
+                                    else if (lastRawColorGeneric.HasValue && framesSinceLastNewFrameGen < currentSmoothFrames)
+                                    {
+                                        rawColor = lastRawColorGeneric.Value;
+                                        framesSinceLastNewFrameGen++;
+                                        isDummyFrame = true;
+                                    }
 
-                                    smoothQueue.Enqueue(avgColor);
-                                    runningSr += avgColor.R;
-                                    runningSg += avgColor.G;
-                                    runningSb += avgColor.B;
+                                    if (rawColor.HasValue)
+                                    {
+                                        FloatColor avgColor = rawColor.Value;
+                                        if (applySmoothingAfterCalibration)
+                                        {
+                                            avgColor = ProcessColor(avgColor);
+                                        }
+                                        FloatColor currentAverage = smoothQueue.Count > 0
+                                            ? new FloatColor((float)(runningSr / smoothQueue.Count), (float)(runningSg / smoothQueue.Count), (float)(runningSb / smoothQueue.Count))
+                                            : avgColor;
+
+                                        float colorChange = Math.Abs(avgColor.R - currentAverage.R) + 
+                                                          Math.Abs(avgColor.G - currentAverage.G) + 
+                                                          Math.Abs(avgColor.B - currentAverage.B);
+
+                                        if (colorChange > currentSmoothThreshold && !isDummyFrame)
+                                        {
+                                            smoothQueue.Clear();
+                                            runningSr = 0; runningSg = 0; runningSb = 0;
+
+                                            smoothQueue.Enqueue(avgColor);
+                                            runningSr += avgColor.R;
+                                            runningSg += avgColor.G;
+                                            runningSb += avgColor.B;
+                                        }
+                                        else
+                                        {
+                                            smoothQueue.Enqueue(avgColor);
+                                            runningSr += avgColor.R;
+                                            runningSg += avgColor.G;
+                                            runningSb += avgColor.B;
+
+                                            while (smoothQueue.Count > currentSmoothFrames && smoothQueue.Count > 0)
+                                            {
+                                                FloatColor dequeued = smoothQueue.Dequeue();
+                                                runningSr -= dequeued.R;
+                                                runningSg -= dequeued.G;
+                                                runningSb -= dequeued.B;
+                                            }
+                                        }
+
+                                        FloatColor finalFloatColor = smoothQueue.Count > 0 
+                                            ? new FloatColor((float)(runningSr / smoothQueue.Count), (float)(runningSg / smoothQueue.Count), (float)(runningSb / smoothQueue.Count))
+                                            : avgColor;
+
+                                        Color finalColor = finalFloatColor.ToColor();
+
+                                        lock (frameLock)
+                                        {
+                                            lastCapturedGenericColor = finalColor;
+                                            lastCapturedGenericFloatColor = finalFloatColor;
+                                        }
+
+                                        if (Environment.TickCount - lastUiUpdate > 30)
+                                        {
+                                            lastUiUpdate = Environment.TickCount;
+                                            this.BeginInvoke(new Action(() =>
+                                            {
+                                                if (isAmbilightActive && isSystemOn)
+                                                {
+                                                    UpdateActiveColor(finalColor, false);
+                                                }
+                                            }));
+                                        }
+                                    }
+                                }
+
+                                int elapsed = Environment.TickCount - loopStart;
+                                int sleepTime = currentCaptureInterval - elapsed;
+                                if (sleepTime > 0)
+                                {
+                                    await Task.Delay(sleepTime);
                                 }
                                 else
                                 {
-                                    // Small change: append to queue for moving average
-                                    smoothQueue.Enqueue(avgColor);
-                                    runningSr += avgColor.R;
-                                    runningSg += avgColor.G;
-                                    runningSb += avgColor.B;
-
-                                    while (smoothQueue.Count > currentSmoothFrames && smoothQueue.Count > 0)
-                                    {
-                                        Color dequeued = smoothQueue.Dequeue();
-                                        runningSr -= dequeued.R;
-                                        runningSg -= dequeued.G;
-                                        runningSb -= dequeued.B;
-                                    }
-                                }
-
-                                Color finalColor = smoothQueue.Count > 0 
-                                    ? Color.FromArgb((int)(runningSr / smoothQueue.Count), (int)(runningSg / smoothQueue.Count), (int)(runningSb / smoothQueue.Count))
-                                    : avgColor;
-
-                                // Send directly to hardware from background thread for max FPS
-                                if (isAmbilightActive && isSystemOn)
-                                {
-                                    SendColorToHardware(finalColor);
-
-                                    // 5. Throttle UI updates to prevent UI redraws from dragging down hardware SPS
-                                    if (Environment.TickCount - lastUiUpdate > 30)
-                                    {
-                                        lastUiUpdate = Environment.TickCount;
-                                        this.BeginInvoke(new Action(() =>
-                                        {
-                                            if (isAmbilightActive && isSystemOn)
-                                            {
-                                                UpdateActiveColor(finalColor, false);
-                                            }
-                                        }));
-                                    }
+                                    await Task.Delay(1);
                                 }
                             }
+                        }
+                        catch (SharpDX.SharpDXException ex)
+                        {
+                            System.IO.File.AppendAllText("dxgi_error.txt", DateTime.Now + " SharpDXException: " + ex.ToString() + Environment.NewLine);
+                            await Task.Delay(500); 
+                        }
+                        catch (Exception ex)
+                        {
+                            System.IO.File.AppendAllText("dxgi_error.txt", DateTime.Now + " GenericException: " + ex.ToString() + Environment.NewLine);
+                            await Task.Delay(500);
+                        }
+                        finally
+                        {
+                            dxgiCapture?.Dispose();
+                        }
+                    }
+                });
 
-                            // Yield execution briefly to push SPS to max physical limit
+                Task transmitTask = Task.Run(async () =>
+                {
+                    while (isAmbilightActive && isSystemOn)
+                    {
+                        int loopStart = Environment.TickCount;
+                        int currentTransmitInterval = 1000 / Math.Max(1, maxTransmitFps);
+
+                        if (isAddressableMode)
+                        {
+                            SendAddressableDataToHardware();
+                        }
+                        else
+                        {
+                            FloatColor colorToSend;
+                            lock (frameLock)
+                            {
+                                colorToSend = lastCapturedGenericFloatColor;
+                            }
+                            SendColorToHardware(colorToSend);
+                        }
+
+                        int elapsed = Environment.TickCount - loopStart;
+                        int sleepTime = currentTransmitInterval - elapsed;
+                        if (sleepTime > 0)
+                        {
+                            await Task.Delay(sleepTime);
+                        }
+                        else
+                        {
                             await Task.Delay(1);
                         }
                     }
-                    catch (SharpDX.SharpDXException ex)
-                    {
-                        System.IO.File.AppendAllText("dxgi_error.txt", DateTime.Now + " SharpDXException: " + ex.ToString() + Environment.NewLine);
-                        // DXGI access lost (e.g., UAC popup, screen resolution change, sleep)
-                        // Break out of inner loop to dispose and recreate DxgiScreenCapture
-                        await Task.Delay(500); 
-                    }
-                    catch (Exception ex)
-                    {
-                        System.IO.File.AppendAllText("dxgi_error.txt", DateTime.Now + " GenericException: " + ex.ToString() + Environment.NewLine);
-                        // Other unexpected errors
-                        await Task.Delay(500);
-                    }
-                    finally
-                    {
-                        dxgiCapture?.Dispose();
-                    }
-                }
+                });
+
+                await Task.WhenAll(captureTask, transmitTask);
             }
             finally
             {
@@ -2531,7 +2791,6 @@ if os.path.exists('run.bat'):
 
         // ==========================================================================
         // RAINBOW SMOOTH Spectrum CYCLE TIMER
-        // ==========================================================================
         private void TimerRainbow_Tick(object sender, EventArgs e)
         {
             if (!isSystemOn) return;
@@ -2662,6 +2921,144 @@ if os.path.exists('run.bat'):
         // APP COLOR STATE SYNC AND REPAINTING PROCESSORS
         // ==========================================================================
         // endpointOverride: if non-null, send to that endpoint instead of the default udpTarget (7778)
+
+        private Color ProcessColor(Color c)
+        {
+            return ProcessColor(FloatColor.FromColor(c)).ToColor();
+        }
+
+        private FloatColor ProcessColor(FloatColor fc)
+        {
+            float finalR = fc.R;
+            float finalG = fc.G;
+            float finalB = fc.B;
+
+            // Ambilight Brightness + Saturation Curve Mapping
+            if (isAmbilightActive)
+            {
+                float v0 = Math.Max(fc.R, Math.Max(fc.G, fc.B));
+                if (v0 > 0)
+                {
+                    float t_in = v0 / 255f;
+                    float mapped_t, satMult;
+                    if (t_in <= 0.3333f)
+                    {
+                        float factor = t_in / 0.3333f;
+                        mapped_t = ambilightCurve[0] + (ambilightCurve[1] - ambilightCurve[0]) * factor;
+                        satMult   = ambilightSatCurve[0] + (ambilightSatCurve[1] - ambilightSatCurve[0]) * factor;
+                    }
+                    else if (t_in <= 0.6666f)
+                    {
+                        float factor = (t_in - 0.3333f) / 0.3333f;
+                        mapped_t = ambilightCurve[1] + (ambilightCurve[2] - ambilightCurve[1]) * factor;
+                        satMult   = ambilightSatCurve[1] + (ambilightSatCurve[2] - ambilightSatCurve[1]) * factor;
+                    }
+                    else
+                    {
+                        float factor = (t_in - 0.6666f) / 0.3334f;
+                        mapped_t = ambilightCurve[2] + (ambilightCurve[3] - ambilightCurve[2]) * factor;
+                        satMult   = ambilightSatCurve[2] + (ambilightSatCurve[3] - ambilightSatCurve[2]) * factor;
+                    }
+
+                    // Apply brightness curve without early byte truncation
+                    float new_v = Math.Min(255f, Math.Max(0f, mapped_t * 255f));
+                    float scale = new_v / v0;
+                    fc = new FloatColor(
+                        Math.Min(255f, fc.R * scale),
+                        Math.Min(255f, fc.G * scale),
+                        Math.Min(255f, fc.B * scale)
+                    );
+
+                    // Apply saturation multiplier
+                    if (Math.Abs(satMult - 1f) > 0.001f)
+                    {
+                        Color cTemp = fc.ToColor();
+                        ColorToHsl(cTemp, out double ch, out double cs, out double cl);
+                        double newSat = Math.Min(1.0, Math.Max(0.0, cs * satMult));
+                        Color cSat = ColorFromHsl(ch, newSat, cl);
+                        fc = FloatColor.FromColor(cSat);
+                    }
+
+                    finalR = fc.R;
+                    finalG = fc.G;
+                    finalB = fc.B;
+                }
+            }
+
+            if (currentCalibProfile != null)
+            {
+                float v = Math.Max(fc.R, Math.Max(fc.G, fc.B));
+                FloatColor w = new FloatColor(255f, 255f, 255f);
+                
+                if (v <= 13f)
+                {
+                    float t = v / 13f;
+                    w = new FloatColor(
+                        currentCalibProfile.PointMin.R + (currentCalibProfile.Point5.R - currentCalibProfile.PointMin.R) * t,
+                        currentCalibProfile.PointMin.G + (currentCalibProfile.Point5.G - currentCalibProfile.PointMin.G) * t,
+                        currentCalibProfile.PointMin.B + (currentCalibProfile.Point5.B - currentCalibProfile.PointMin.B) * t
+                    );
+                }
+                else if (v <= 76f)
+                {
+                    float t = (v - 13f) / 63f;
+                    w = new FloatColor(
+                        currentCalibProfile.Point5.R + (currentCalibProfile.Point30.R - currentCalibProfile.Point5.R) * t,
+                        currentCalibProfile.Point5.G + (currentCalibProfile.Point30.G - currentCalibProfile.Point5.G) * t,
+                        currentCalibProfile.Point5.B + (currentCalibProfile.Point30.B - currentCalibProfile.Point5.B) * t
+                    );
+                }
+                else if (v <= 153f)
+                {
+                    float t = (v - 76f) / 77f;
+                    w = new FloatColor(
+                        currentCalibProfile.Point30.R + (currentCalibProfile.Point60.R - currentCalibProfile.Point30.R) * t,
+                        currentCalibProfile.Point30.G + (currentCalibProfile.Point60.G - currentCalibProfile.Point30.G) * t,
+                        currentCalibProfile.Point30.B + (currentCalibProfile.Point60.B - currentCalibProfile.Point30.B) * t
+                    );
+                }
+                else
+                {
+                    float t = (v - 153f) / 102f;
+                    w = new FloatColor(
+                        currentCalibProfile.Point60.R + (currentCalibProfile.Point100.R - currentCalibProfile.Point60.R) * t,
+                        currentCalibProfile.Point60.G + (currentCalibProfile.Point100.G - currentCalibProfile.Point60.G) * t,
+                        currentCalibProfile.Point60.B + (currentCalibProfile.Point100.B - currentCalibProfile.Point60.B) * t
+                    );
+                }
+
+                if (v > 0)
+                {
+                    if (isRainbowActive || isAmbilightActive)
+                    {
+                        finalR = fc.R * (w.R / v);
+                        finalG = fc.G * (w.G / v);
+                        finalB = fc.B * (w.B / v);
+                    }
+                    else
+                    {
+                        float maxW = 0;
+                        if (fc.R > 0) maxW = Math.Max(maxW, w.R);
+                        if (fc.G > 0) maxW = Math.Max(maxW, w.G);
+                        if (fc.B > 0) maxW = Math.Max(maxW, w.B);
+
+                        if (maxW > 0)
+                        {
+                            finalR = fc.R * (w.R / maxW);
+                            finalG = fc.G * (w.G / maxW);
+                            finalB = fc.B * (w.B / maxW);
+                        }
+                    }
+                }
+                
+                finalR = Math.Min(255f, Math.Max(0f, finalR));
+                finalG = Math.Min(255f, Math.Max(0f, finalG));
+                finalB = Math.Min(255f, Math.Max(0f, finalB));
+            }
+
+            return new FloatColor(finalR, finalG, finalB);
+        }
+
         private void SendAddressableDataToHardware(IPEndPoint endpointOverride = null)
         {
             if (!isConnected) return;
@@ -2669,136 +3066,26 @@ if os.path.exists('run.bat'):
 
             byte[] data = new byte[addressablePixelCount * 3];
             
+            Color[] localColors;
+            lock (frameLock)
+            {
+                localColors = (Color[])segmentColors.Clone();
+            }
+
             // Generate data packet for addressable pixels
             for (int i = 0; i < addressablePixelCount; i++)
             {
                 int targetIndex = invertPixelOrder ? (addressablePixelCount - 1 - i) : i;
-                Color c = segmentColors[targetIndex];
+                Color c = (targetIndex < localColors.Length) ? localColors[targetIndex] : Color.Black;
+
+                if (!applySmoothingAfterCalibration || !isAmbilightActive)
+                {
+                    c = ProcessColor(c);
+                }
+
                 int finalR = c.R;
                 int finalG = c.G;
                 int finalB = c.B;
-
-                // Ambilight Brightness + Saturation Curve Mapping
-                if (isAmbilightActive)
-                {
-                    int v0 = Math.Max(c.R, Math.Max(c.G, c.B));
-                    if (v0 > 0)
-                    {
-                        float t_in = v0 / 255f;
-                        float mapped_t, satMult;
-                        if (t_in <= 0.3333f)
-                        {
-                            float factor = t_in / 0.3333f;
-                            mapped_t = ambilightCurve[0] + (ambilightCurve[1] - ambilightCurve[0]) * factor;
-                            satMult   = ambilightSatCurve[0] + (ambilightSatCurve[1] - ambilightSatCurve[0]) * factor;
-                        }
-                        else if (t_in <= 0.6666f)
-                        {
-                            float factor = (t_in - 0.3333f) / 0.3333f;
-                            mapped_t = ambilightCurve[1] + (ambilightCurve[2] - ambilightCurve[1]) * factor;
-                            satMult   = ambilightSatCurve[1] + (ambilightSatCurve[2] - ambilightSatCurve[1]) * factor;
-                        }
-                        else
-                        {
-                            float factor = (t_in - 0.6666f) / 0.3334f;
-                            mapped_t = ambilightCurve[2] + (ambilightCurve[3] - ambilightCurve[2]) * factor;
-                            satMult   = ambilightSatCurve[2] + (ambilightSatCurve[3] - ambilightSatCurve[2]) * factor;
-                        }
-
-                        // Apply brightness curve
-                        int new_v = Math.Min(255, Math.Max(0, (int)(mapped_t * 255f)));
-                        float scale = new_v / (float)v0;
-                        c = Color.FromArgb(
-                            Math.Min(255, (int)(c.R * scale)),
-                            Math.Min(255, (int)(c.G * scale)),
-                            Math.Min(255, (int)(c.B * scale))
-                        );
-
-                        // Apply saturation multiplier (0..2 range, clamped to 0..1)
-                        // satMult: 1.0 = no change, 2.0 = double sat (capped), 0 = grayscale
-                        if (Math.Abs(satMult - 1f) > 0.001f)
-                        {
-                            ColorToHsl(c, out double ch, out double cs, out double cl);
-                            double newSat = Math.Min(1.0, Math.Max(0.0, cs * satMult));
-                            c = ColorFromHsl(ch, newSat, cl);
-                        }
-
-                        finalR = c.R;
-                        finalG = c.G;
-                        finalB = c.B;
-                    }
-                }
-
-                if (currentCalibProfile != null)
-                {
-                    int v = Math.Max(c.R, Math.Max(c.G, c.B));
-                    Color w = Color.White;
-                    
-                    if (v <= 13)
-                    {
-                        float t = v / 13f;
-                        w = Color.FromArgb(
-                            (int)(currentCalibProfile.PointMin.R + (currentCalibProfile.Point5.R - currentCalibProfile.PointMin.R) * t),
-                            (int)(currentCalibProfile.PointMin.G + (currentCalibProfile.Point5.G - currentCalibProfile.PointMin.G) * t),
-                            (int)(currentCalibProfile.PointMin.B + (currentCalibProfile.Point5.B - currentCalibProfile.PointMin.B) * t)
-                        );
-                    }
-                    else if (v <= 76)
-                    {
-                        float t = (v - 13) / 63f;
-                        w = Color.FromArgb(
-                            (int)(currentCalibProfile.Point5.R + (currentCalibProfile.Point30.R - currentCalibProfile.Point5.R) * t),
-                            (int)(currentCalibProfile.Point5.G + (currentCalibProfile.Point30.G - currentCalibProfile.Point5.G) * t),
-                            (int)(currentCalibProfile.Point5.B + (currentCalibProfile.Point30.B - currentCalibProfile.Point5.B) * t)
-                        );
-                    }
-                    else if (v <= 153)
-                    {
-                        float t = (v - 76) / 77f;
-                        w = Color.FromArgb(
-                            (int)(currentCalibProfile.Point30.R + (currentCalibProfile.Point60.R - currentCalibProfile.Point30.R) * t),
-                            (int)(currentCalibProfile.Point30.G + (currentCalibProfile.Point60.G - currentCalibProfile.Point30.G) * t),
-                            (int)(currentCalibProfile.Point30.B + (currentCalibProfile.Point60.B - currentCalibProfile.Point30.B) * t)
-                        );
-                    }
-                    else
-                    {
-                        float t = (v - 153) / 102f;
-                        w = Color.FromArgb(
-                            (int)(currentCalibProfile.Point60.R + (currentCalibProfile.Point100.R - currentCalibProfile.Point60.R) * t),
-                            (int)(currentCalibProfile.Point60.G + (currentCalibProfile.Point100.G - currentCalibProfile.Point60.G) * t),
-                            (int)(currentCalibProfile.Point60.B + (currentCalibProfile.Point100.B - currentCalibProfile.Point60.B) * t)
-                        );
-                    }
-
-                    if (v > 0)
-                    {
-                        if (isRainbowActive || isAmbilightActive)
-                        {
-                            finalR = (int)(c.R * (w.R / (float)v));
-                            finalG = (int)(c.G * (w.G / (float)v));
-                            finalB = (int)(c.B * (w.B / (float)v));
-                        }
-                        else
-                        {
-                            float maxW = 0;
-                            if (c.R > 0) maxW = Math.Max(maxW, w.R);
-                            if (c.G > 0) maxW = Math.Max(maxW, w.G);
-                            if (c.B > 0) maxW = Math.Max(maxW, w.B);
-
-                            if (maxW > 0)
-                            {
-                                finalR = (int)(c.R * (w.R / maxW));
-                                finalG = (int)(c.G * (w.G / maxW));
-                                finalB = (int)(c.B * (w.B / maxW));
-                            }
-                        }
-                    }
-                    
-                    finalR = Math.Min(255, Math.Max(0, finalR));
-                    finalG = Math.Min(255, Math.Max(0, finalG));
-                    finalB = Math.Min(255, Math.Max(0, finalB));
-                }
 
                 if (!isSystemOn)
                 {
@@ -2811,6 +3098,27 @@ if os.path.exists('run.bat'):
                 data[i * 3 + 1] = (byte)finalG;
                 data[i * 3 + 2] = (byte)finalB;
             }
+
+            // Check if packet is identical to last sent packet
+            if (lastSentAddressableData != null && lastSentAddressableData.Length == data.Length)
+            {
+                bool isSame = true;
+                for (int i = 0; i < data.Length; i++)
+                {
+                    if (data[i] != lastSentAddressableData[i])
+                    {
+                        isSame = false;
+                        break;
+                    }
+                }
+
+                if (isSame)
+                {
+                    System.Threading.Interlocked.Increment(ref streamsSentThisSecond);
+                    return;
+                }
+            }
+            lastSentAddressableData = (byte[])data.Clone();
 
             // Stream to hardware
             if (useUdp)
@@ -2850,155 +3158,69 @@ if os.path.exists('run.bat'):
         // endpointOverride: if non-null, send to that endpoint instead of the default udpTarget (7778)
         private void SendColorToHardware(Color c, IPEndPoint endpointOverride = null)
         {
+            SendColorToHardware(FloatColor.FromColor(c), endpointOverride);
+        }
+
+        private void SendColorToHardware(FloatColor fc, IPEndPoint endpointOverride = null)
+        {
             if (!isConnected) return;
             var ep = endpointOverride ?? udpTarget;
 
-            int finalR = c.R;
-            int finalG = c.G;
-            int finalB = c.B;
-
-            // Ambilight Brightness + Saturation Curve Mapping
-            if (isAmbilightActive)
+            if (!applySmoothingAfterCalibration || !isAmbilightActive)
             {
-                int v0 = Math.Max(c.R, Math.Max(c.G, c.B));
-                if (v0 > 0)
-                {
-                    float t_in = v0 / 255f;
-                    float mapped_t, satMult;
-                    if (t_in <= 0.3333f)
-                    {
-                        float factor = t_in / 0.3333f;
-                        mapped_t = ambilightCurve[0] + (ambilightCurve[1] - ambilightCurve[0]) * factor;
-                        satMult   = ambilightSatCurve[0] + (ambilightSatCurve[1] - ambilightSatCurve[0]) * factor;
-                    }
-                    else if (t_in <= 0.6666f)
-                    {
-                        float factor = (t_in - 0.3333f) / 0.3333f;
-                        mapped_t = ambilightCurve[1] + (ambilightCurve[2] - ambilightCurve[1]) * factor;
-                        satMult   = ambilightSatCurve[1] + (ambilightSatCurve[2] - ambilightSatCurve[1]) * factor;
-                    }
-                    else
-                    {
-                        float factor = (t_in - 0.6666f) / 0.3334f;
-                        mapped_t = ambilightCurve[2] + (ambilightCurve[3] - ambilightCurve[2]) * factor;
-                        satMult   = ambilightSatCurve[2] + (ambilightSatCurve[3] - ambilightSatCurve[2]) * factor;
-                    }
-
-                    // Apply brightness curve
-                    int new_v = Math.Min(255, Math.Max(0, (int)(mapped_t * 255f)));
-                    float scale = new_v / (float)v0;
-                    c = Color.FromArgb(
-                        Math.Min(255, (int)(c.R * scale)),
-                        Math.Min(255, (int)(c.G * scale)),
-                        Math.Min(255, (int)(c.B * scale))
-                    );
-
-                    // Apply saturation multiplier (0..2 range, clamped to 0..1)
-                    if (Math.Abs(satMult - 1f) > 0.001f)
-                    {
-                        ColorToHsl(c, out double ch, out double cs, out double cl);
-                        double newSat = Math.Min(1.0, Math.Max(0.0, cs * satMult));
-                        c = ColorFromHsl(ch, newSat, cl);
-                    }
-
-                    finalR = c.R;
-                    finalG = c.G;
-                    finalB = c.B;
-                }
+                fc = ProcessColor(fc);
             }
 
-            if (currentCalibProfile != null)
+            float finalR = fc.R;
+            float finalG = fc.G;
+            float finalB = fc.B;
+
+            byte[] data;
+            if (highPwmResolution)
             {
-                int v = Math.Max(c.R, Math.Max(c.G, c.B));
+                int r2048 = Math.Min(2047, Math.Max(0, (int)Math.Round(finalR * 2047f / 255f)));
+                int g2048 = Math.Min(2047, Math.Max(0, (int)Math.Round(finalG * 2047f / 255f)));
+                int b2048 = Math.Min(2047, Math.Max(0, (int)Math.Round(finalB * 2047f / 255f)));
 
-                Color w = Color.White;
-                
-                if (v <= 13) // 0-5% (using dynamic min brightness at v=0)
+                if (lastSent2048R == r2048 && lastSent2048G == g2048 && lastSent2048B == b2048)
                 {
-                    float t = v / 13f;
-                    w = Color.FromArgb(
-                        (int)(currentCalibProfile.PointMin.R + (currentCalibProfile.Point5.R - currentCalibProfile.PointMin.R) * t),
-                        (int)(currentCalibProfile.PointMin.G + (currentCalibProfile.Point5.G - currentCalibProfile.PointMin.G) * t),
-                        (int)(currentCalibProfile.PointMin.B + (currentCalibProfile.Point5.B - currentCalibProfile.PointMin.B) * t)
-                    );
-                }
-                else if (v <= 76) // 5-30%
-                {
-                    float t = (v - 13) / 63f; // 76 - 13 = 63
-                    w = Color.FromArgb(
-                        (int)(currentCalibProfile.Point5.R + (currentCalibProfile.Point30.R - currentCalibProfile.Point5.R) * t),
-                        (int)(currentCalibProfile.Point5.G + (currentCalibProfile.Point30.G - currentCalibProfile.Point5.G) * t),
-                        (int)(currentCalibProfile.Point5.B + (currentCalibProfile.Point30.B - currentCalibProfile.Point5.B) * t)
-                    );
-                }
-                else if (v <= 153) // 30-60%
-                {
-                    float t = (v - 76) / 77f; // 153 - 76 = 77
-                    w = Color.FromArgb(
-                        (int)(currentCalibProfile.Point30.R + (currentCalibProfile.Point60.R - currentCalibProfile.Point30.R) * t),
-                        (int)(currentCalibProfile.Point30.G + (currentCalibProfile.Point60.G - currentCalibProfile.Point30.G) * t),
-                        (int)(currentCalibProfile.Point30.B + (currentCalibProfile.Point60.B - currentCalibProfile.Point30.B) * t)
-                    );
-                }
-                else // 60-100%
-                {
-                    float t = (v - 153) / 102f; // 255 - 153 = 102
-                    w = Color.FromArgb(
-                        (int)(currentCalibProfile.Point60.R + (currentCalibProfile.Point100.R - currentCalibProfile.Point60.R) * t),
-                        (int)(currentCalibProfile.Point60.G + (currentCalibProfile.Point100.G - currentCalibProfile.Point60.G) * t),
-                        (int)(currentCalibProfile.Point60.B + (currentCalibProfile.Point100.B - currentCalibProfile.Point60.B) * t)
-                    );
+                    System.Threading.Interlocked.Increment(ref streamsSentThisSecond);
+                    return;
                 }
 
-                if (v > 0)
-                {
-                    // Scale color by the mapped white point
-                    if (isRainbowActive || isAmbilightActive)
-                    {
-                        finalR = (int)(c.R * (w.R / (float)v));
-                        finalG = (int)(c.G * (w.G / (float)v));
-                        finalB = (int)(c.B * (w.B / (float)v));
-                    }
-                    else
-                    {
-                        float maxW = 0;
-                        if (c.R > 0) maxW = Math.Max(maxW, w.R);
-                        if (c.G > 0) maxW = Math.Max(maxW, w.G);
-                        if (c.B > 0) maxW = Math.Max(maxW, w.B);
+                lastSent2048R = r2048;
+                lastSent2048G = g2048;
+                lastSent2048B = b2048;
+                lastSentColor = fc.ToColor();
 
-                        if (maxW > 0)
-                        {
-                            finalR = (int)(c.R * (w.R / maxW));
-                            finalG = (int)(c.G * (w.G / maxW));
-                            finalB = (int)(c.B * (w.B / maxW));
-                        }
-                    }
-                }
-                
-                // Clamp just in case
-                finalR = Math.Min(255, Math.Max(0, finalR));
-                finalG = Math.Min(255, Math.Max(0, finalG));
-                finalB = Math.Min(255, Math.Max(0, finalB));
+                data = new byte[] {
+                    (byte)(r2048 >> 8), (byte)(r2048 & 0xFF),
+                    (byte)(g2048 >> 8), (byte)(g2048 & 0xFF),
+                    (byte)(b2048 >> 8), (byte)(b2048 & 0xFF)
+                };
             }
-
-            if (lastSentColor.R == finalR && lastSentColor.G == finalG && lastSentColor.B == finalB)
+            else
             {
-                // To drastically improve performance and eliminate lag, 
-                // do not flood the hardware bus (Serial/UDP) with redundant identical packets.
-                System.Threading.Interlocked.Increment(ref streamsSentThisSecond);
-                return;
+                Color intColor = fc.ToColor();
+                int finalIntR = intColor.R;
+                int finalIntG = intColor.G;
+                int finalIntB = intColor.B;
+
+                if (lastSentColor.R == finalIntR && lastSentColor.G == finalIntG && lastSentColor.B == finalIntB)
+                {
+                    System.Threading.Interlocked.Increment(ref streamsSentThisSecond);
+                    return;
+                }
+
+                lastSentColor = intColor;
+                data = new byte[] { (byte)finalIntR, (byte)finalIntG, (byte)finalIntB };
             }
-
-            lastSentColor = Color.FromArgb(finalR, finalG, finalB);
-
-            // Ensure the packet is strictly exactly 3 bytes: [R, G, B]
-            byte[] data = new byte[] { (byte)finalR, (byte)finalG, (byte)finalB };
 
             if (useUdp)
             {
                 try 
                 { 
-                    udpClient?.SendAsync(data, 3, ep); 
+                    udpClient?.SendAsync(data, data.Length, ep); 
                     System.Threading.Interlocked.Increment(ref streamsSentThisSecond);
                 } 
                 catch { }
@@ -3009,11 +3231,31 @@ if os.path.exists('run.bat'):
                 { 
                     if (serialPort != null && serialPort.IsOpen) 
                     {
-                        serialPort.Write(data, 0, 3); 
+                        serialPort.Write(data, 0, data.Length); 
                         System.Threading.Interlocked.Increment(ref streamsSentThisSecond);
                     }
                 } 
                 catch { }
+            }
+
+            if (lblDataPacket != null && lblDataPacket.IsHandleCreated)
+            {
+                string packetText;
+                if (highPwmResolution)
+                {
+                    packetText = $"PACKET: [{lastSent2048R}, {lastSent2048G}, {lastSent2048B}]";
+                }
+                else
+                {
+                    packetText = $"PACKET: [{lastSentColor.R}, {lastSentColor.G}, {lastSentColor.B}]";
+                }
+
+                if (lblDataPacket.Text != packetText)
+                {
+                    lblDataPacket.BeginInvoke(new Action(() => {
+                        lblDataPacket.Text = packetText;
+                    }));
+                }
             }
         }
 
@@ -3127,11 +3369,6 @@ if os.path.exists('run.bat'):
             if (streamToHardware)
             {
                 SendColorToHardware(c, endpointOverride);
-            }
-
-            if (lblDataPacket != null)
-            {
-                lblDataPacket.Text = $"PACKET: [{lastSentColor.R}, {lastSentColor.G}, {lastSentColor.B}]";
             }
         }
 
@@ -3617,7 +3854,7 @@ if os.path.exists('run.bat'):
             for (int i = 0; i < 4; i++)
             {
                 _bx[i] = Math.Max(0f, Math.Min(1f,  brightness[i]));
-                _sy[i] = Math.Max(0f, Math.Min(2f, saturation[i]));
+                _sy[i] = Math.Max(0f, Math.Min(6f, saturation[i]));
             }
             Invalidate();
         }
@@ -3629,7 +3866,7 @@ if os.path.exists('run.bat'):
         {
             var gr = GraphRect;
             float x = gr.Left + bx * gr.Width;
-            float y = gr.Bottom - (sy / 2f) * gr.Height;  // Y=0 at bottom, Y=2 at top
+            float y = gr.Bottom - (sy / 6f) * gr.Height;  // Y=0 at bottom, Y=6 at top
             return new PointF(x, y);
         }
 
@@ -3637,7 +3874,7 @@ if os.path.exists('run.bat'):
         {
             var gr = GraphRect;
             float bx = Math.Max(0f, Math.Min(1f,  (px - gr.Left) / (float)gr.Width));
-            float sy = Math.Max(0f, Math.Min(2f, (1f - (py - gr.Top) / (float)gr.Height) * 2f));
+            float sy = Math.Max(0f, Math.Min(6f, (1f - (py - gr.Top) / (float)gr.Height) * 6f));
             return (bx, sy);
         }
 
@@ -3717,13 +3954,13 @@ if os.path.exists('run.bat'):
                 g.FillRectangle(bgBrush, ClientRectangle);
 
             // ── Grid lines ───────────────────────────────────────────────────
-            // Horizontal grid: 0%, 50%, 100%, 150%, 200% saturation
-            float[] yGridVals = { 0f, 0.5f, 1f, 1.5f, 2f };
-            string[] yGridLabels = { "0%", "50%", "100%", "150%", "200%" };
+            // Horizontal grid: 0%, 100%, 200%, 300%, 400%, 500%, 600% saturation
+            float[] yGridVals = { 0f, 1f, 2f, 3f, 4f, 5f, 6f };
+            string[] yGridLabels = { "0%", "100%", "200%", "300%", "400%", "500%", "600%" };
             for (int gi = 0; gi < yGridVals.Length; gi++)
             {
                 PointF p = ToScreen(0, yGridVals[gi]);
-                bool isSpecial = (gi == 2); // 100% line is highlighted
+                bool isSpecial = (gi == 1); // 100% line is highlighted
                 using (var pen = new Pen(isSpecial
                     ? Color.FromArgb(55, 0, 210, 255)
                     : Color.FromArgb(28, 255, 255, 255), isSpecial ? 1.2f : 0.8f))

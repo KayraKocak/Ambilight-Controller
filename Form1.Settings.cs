@@ -41,6 +41,19 @@ namespace AmbilightControllerForm
             writeSingle("BackgroundBlur", backgroundBlur.ToString());
             writeSingle("PortFastExecution", portFastExecution.ToString());
             writeSingle("PortEventBased", portEventBased.ToString());
+            writeSingle("MaxCaptureFps", maxCaptureFps.ToString());
+            writeSingle("MaxTransmitFps", maxTransmitFps.ToString());
+            writeSingle("ApplySmoothingAfterCalibration", applySmoothingAfterCalibration.ToString());
+            writeSingle("HighPwmResolution", highPwmResolution.ToString());
+            writeSingle("GenericGridWidth", genericGridWidth.ToString());
+            writeSingle("GenericGridHeight", genericGridHeight.ToString());
+            writeSingle("GenericMarginX", genericMarginX.ToString());
+            writeSingle("GenericMarginY", genericMarginY.ToString());
+            writeSingle("AddressableGridWidth", addressableGridWidth.ToString());
+            writeSingle("AddressableGridHeight", addressableGridHeight.ToString());
+            writeSingle("AddressableMarginX", addressableMarginX.ToString());
+            writeSingle("AddressableMarginY", addressableMarginY.ToString());
+            writeSingle("AddressableInnerMargin", addressableInnerMargin.ToString());
 
             int activeCalibIndex = 3;
             if (calBtns != null && calBtns.Length == 4) {
@@ -156,6 +169,35 @@ namespace AmbilightControllerForm
                     if (singleValues.TryGetValue("BackgroundBlur", out string bgBlur)) int.TryParse(bgBlur, out backgroundBlur);
                     if (singleValues.TryGetValue("PortFastExecution", out string pfeStr)) int.TryParse(pfeStr, out portFastExecution);
                     if (singleValues.TryGetValue("PortEventBased", out string pebStr)) int.TryParse(pebStr, out portEventBased);
+                    if (singleValues.TryGetValue("MaxCaptureFps", out string mcfStr)) int.TryParse(mcfStr, out maxCaptureFps);
+                    if (singleValues.TryGetValue("MaxTransmitFps", out string mtfStr)) int.TryParse(mtfStr, out maxTransmitFps);
+                    if (singleValues.TryGetValue("ApplySmoothingAfterCalibration", out string asacStr)) bool.TryParse(asacStr, out applySmoothingAfterCalibration);
+                    if (singleValues.TryGetValue("HighPwmResolution", out string hprStr)) bool.TryParse(hprStr, out highPwmResolution);
+                    if (singleValues.TryGetValue("GenericGridWidth", out string ggwStr)) int.TryParse(ggwStr, out genericGridWidth);
+                    else if (singleValues.TryGetValue("GridWidth", out string gwStr)) int.TryParse(gwStr, out genericGridWidth);
+
+                    if (singleValues.TryGetValue("GenericGridHeight", out string gghStr)) int.TryParse(gghStr, out genericGridHeight);
+                    else if (singleValues.TryGetValue("GridHeight", out string ghStr)) int.TryParse(ghStr, out genericGridHeight);
+
+                    if (singleValues.TryGetValue("GenericMarginX", out string gmxStr)) int.TryParse(gmxStr, out genericMarginX);
+                    else if (singleValues.TryGetValue("MarginX", out string mxStr)) int.TryParse(mxStr, out genericMarginX);
+
+                    if (singleValues.TryGetValue("GenericMarginY", out string gmyStr)) int.TryParse(gmyStr, out genericMarginY);
+                    else if (singleValues.TryGetValue("MarginY", out string myStr)) int.TryParse(myStr, out genericMarginY);
+
+                    if (singleValues.TryGetValue("AddressableGridWidth", out string agwStr)) int.TryParse(agwStr, out addressableGridWidth);
+                    else if (singleValues.TryGetValue("GridWidth", out string gw2Str)) int.TryParse(gw2Str, out addressableGridWidth);
+
+                    if (singleValues.TryGetValue("AddressableGridHeight", out string aghStr)) int.TryParse(aghStr, out addressableGridHeight);
+                    else if (singleValues.TryGetValue("GridHeight", out string gh2Str)) int.TryParse(gh2Str, out addressableGridHeight);
+
+                    if (singleValues.TryGetValue("AddressableMarginX", out string amxStr)) int.TryParse(amxStr, out addressableMarginX);
+                    else if (singleValues.TryGetValue("MarginX", out string mx2Str)) int.TryParse(mx2Str, out addressableMarginX);
+
+                    if (singleValues.TryGetValue("AddressableMarginY", out string amyStr)) int.TryParse(amyStr, out addressableMarginY);
+                    else if (singleValues.TryGetValue("MarginY", out string my2Str)) int.TryParse(my2Str, out addressableMarginY);
+
+                    if (singleValues.TryGetValue("AddressableInnerMargin", out string aimStr)) int.TryParse(aimStr, out addressableInnerMargin);
 
                     if (multiValues.TryGetValue("AmbilightCurve", out List<string> ac) && ac.Count == 4) {
                         var ic = System.Globalization.CultureInfo.InvariantCulture;
@@ -203,6 +245,8 @@ namespace AmbilightControllerForm
                     // Verify parsing logic works and variables are fully compatible
                     if (singleValues.TryGetValue("AddressablePixelCount", out string apcStr)) int.Parse(apcStr);
                     if (singleValues.TryGetValue("SmoothThreshold", out string stStr)) int.Parse(stStr);
+                    if (singleValues.TryGetValue("MaxCaptureFps", out string mcfStr)) int.Parse(mcfStr);
+                    if (singleValues.TryGetValue("MaxTransmitFps", out string mtfStr)) int.Parse(mtfStr);
                     if (multiValues.TryGetValue("AmbilightCurve", out List<string> ac)) {
                         if (ac.Count != 4) throw new Exception("Invalid curve length");
                         var ic = System.Globalization.CultureInfo.InvariantCulture;
